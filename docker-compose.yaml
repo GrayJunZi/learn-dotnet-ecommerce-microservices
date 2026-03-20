@@ -1,0 +1,12 @@
+﻿services:
+  catalog.db:
+    image: mongo
+
+  catalog.api:
+    image: catalog.api
+    build:
+      context: .
+      dockerfile: src/Services/Catalog/Catalog.API/Dockerfile
+
+volumes:
+  mongo_data:
