@@ -444,3 +444,267 @@ docker-compose up -d
 | POST | `/api/v1/Catalog` | 创建产品 |
 | PUT | `/api/v1/Catalog/{id}` | 更新产品 |
 | DELETE | `/api/v1/Catalog?id={id}` | 删除产品 |
+
+## 三、Basket 微服务
+
+Basket 微服务负责购物车管理，采用整洁架构设计，使用 Redis 作为分布式缓存存储。
+
+### 1. 项目结构
+
+```
+src/Services/Basket/
+├── Basket.API/              # API 层 - 控制器、程序入口
+├── Basket.Application/      # 应用层 - CQRS 命令与查询处理
+├── Basket.Core/             # 核心层 - 实体、仓储接口
+└── Basket.Infrastructure/   # 基础设施层 - 仓储实现、Redis 配置
+```
+
+### 2. 项目依赖关系
+
+```
+Basket.API → Basket.Application, Basket.Infrastructure
+Basket.Infrastructure → Basket.Application
+Basket.Application → Basket.Core
+```
+
+### 3. NuGet 包依赖
+
+| 项目 | 包名 | 版本 |
+|------|------|------|
+| Basket.API | Microsoft.AspNetCore.OpenApi | 10.0.0 |
+| Basket.Application | MediatR | 14.1.0 |
+| Basket.Infrastructure | Microsoft.Extensions.Caching.StackExchangeRedis | 10.0.5 |
+
+---
+
+### 4. 核心层 (Basket.Core)
+
+#### 4.1 实体类
+
+```csharp
+// Entities/ShoppingCart.cs
+public class ShoppingCart
+{
+    public string UserName { get; set; }
+    public List<ShoppingCartItem> Items { get; set; } = [];
+    public ShoppingCart(string userName) => UserName = userName;
+}
+
+// Entities/ShoppingCartItem.cs
+public class ShoppingCartItem
+{
+    public int Quantity { get; set; }
+    public decimal Price { get; set; }
+    public string ProductId { get; set; }
+    public string ProductName { get; set; }
+    public string ImageFile { get; set; }
+}
+
+// Entities/BasketCheckout.cs
+public class BasketCheckout
+{
+    public string UserName { get; set; }
+    public decimal TotalPrice { get; set; }
+    public string Name { get; set; }
+    public string Email { get; set; }
+    public string Address { get; set; }
+    public string CardNumber { get; set; }
+    public string PaymentMethod { get; set; }
+}
+```
+
+#### 4.2 仓储接口
+
+```csharp
+// Repositories/IBasketRepository.cs
+public interface IBasketRepository
+{
+    Task<ShoppingCart> GetBasket(string userName);
+    Task<ShoppingCart> UpdateBasket(ShoppingCart shoppingCart);
+    Task DeleteBasket(string userName);
+}
+```
+
+---
+
+### 5. 基础设施层 (Basket.Infrastructure)
+
+#### 5.1 缓存配置
+
+```csharp
+// Settings/CacheSettings.cs
+public class CacheSettings
+{
+    public string ConnectionString { get; init; }
+}
+```
+
+#### 5.2 仓储实现
+
+```csharp
+// Repositories/BasketRepository.cs
+public class BasketRepository(IDistributedCache cache) : IBasketRepository
+{
+    public async Task<ShoppingCart> GetBasket(string userName)
+    {
+        var basket = await cache.GetStringAsync(userName);
+        return string.IsNullOrEmpty(basket) ? null : JsonSerializer.Deserialize<ShoppingCart>(basket);
+    }
+
+    public async Task<ShoppingCart> UpdateBasket(ShoppingCart shoppingCart)
+    {
+        await cache.SetStringAsync(shoppingCart.UserName, JsonSerializer.Serialize(shoppingCart));
+        return await GetBasket(shoppingCart.UserName);
+    }
+
+    public async Task DeleteBasket(string userName) => await cache.RemoveAsync(userName);
+}
+```
+
+---
+
+### 6. 应用层 (Basket.Application)
+
+#### 6.1 DTOs 与 Responses
+
+```csharp
+// DTOs/BasketDto.cs
+public record ShoppingCartDto(string UserName, List<ShoppingCartItemDto> Items, decimal TotalPrice);
+public record ShoppingCartItemDto(string ProductId, string ProductName, string ImageFile, decimal Price, int Quantity);
+public record CreateShoppingCartItemDto(string ProductId, string ProductName, string ImageFile, decimal Price, int Quantity);
+
+// Responses/ShoppingCartItemResponse.cs
+public record class ShoppingCartResponse
+{
+    public string UserName { get; init; }
+    public IEnumerable<ShoppingCartItemResponse> Items { get; init; }
+    public decimal TotalPrice => Items.Sum(x => x.Price * x.Quantity);
+}
+```
+
+#### 6.2 Query 与 Handler
+
+```csharp
+// Queries/GetBasketByUserNameQuery.cs
+public record GetBasketByUserNameQuery(string UserName) : IRequest<ShoppingCartResponse>;
+
+// Handlers/GetBasketByUserNameHandler.cs
+public class GetBasketByUserNameHandler(IBasketRepository basketRepository)
+    : IRequestHandler<GetBasketByUserNameQuery, ShoppingCartResponse>
+{
+    public async Task<ShoppingCartResponse> Handle(GetBasketByUserNameQuery request, CancellationToken cancellationToken)
+    {
+        var shoppingCart = await basketRepository.GetBasket(request.UserName);
+        return shoppingCart?.ToResponse() ?? new ShoppingCartResponse { Items = [] };
+    }
+}
+```
+
+#### 6.3 Command 与 Handler
+
+```csharp
+// Commands/CreateShoppingCartCommand.cs
+public record CreateShoppingCartCommand(string UserName, List<CreateShoppingCartItemDto> Items) 
+    : IRequest<ShoppingCartResponse>;
+
+// Commands/DeleteBasketByUserNameCommand.cs
+public record DeleteBasketByUserNameCommand(string UserName) : IRequest<Unit>;
+
+// Handlers/CreateShoppingCartHandler.cs
+public class CreateShoppingCartHandler(IBasketRepository basketRepository)
+    : IRequestHandler<CreateShoppingCartCommand, ShoppingCartResponse>
+{
+    public async Task<ShoppingCartResponse> Handle(CreateShoppingCartCommand request, CancellationToken cancellationToken)
+    {
+        var updatedCart = await basketRepository.UpdateBasket(request.ToEntity());
+        return updatedCart.ToResponse();
+    }
+}
+```
+
+---
+
+### 7. API 层 (Basket.API)
+
+#### 7.1 Program.cs
+
+```csharp
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddControllers();
+builder.Services.AddSwaggerGen();
+
+builder.Services.AddScoped<IBasketRepository, BasketRepository>();
+
+builder.Services.AddMediatR(cfg => cfg.RegisterServicesFromAssemblies(
+    typeof(CreateShoppingCartHandler).Assembly));
+
+builder.Services.Configure<CacheSettings>(builder.Configuration.GetSection(nameof(CacheSettings)));
+builder.Services.AddStackExchangeRedisCache(options =>
+{
+    options.Configuration = builder.Configuration.GetSection(nameof(CacheSettings)).GetValue<string>("ConnectionString");
+});
+
+var app = builder.Build();
+
+app.UseSwagger();
+app.UseSwaggerUI();
+app.MapControllers();
+app.Run();
+```
+
+#### 7.2 BasketController
+
+```csharp
+[ApiController]
+[Route("api/v1/[controller]")]
+public class BasketController(IMediator mediator) : ControllerBase
+{
+    [HttpGet("{userName}")]
+    public async Task<IActionResult> GetBasket(string userName)
+        => Ok(await mediator.Send(new GetBasketByUserNameQuery(userName)));
+
+    [HttpPost]
+    public async Task<IActionResult> CreateBasket([FromBody] CreateShoppingCartCommand command)
+        => Ok(await mediator.Send(command));
+
+    [HttpDelete("{userName}")]
+    public async Task<IActionResult> DeleteBasket(string userName)
+        => Ok(await mediator.Send(new DeleteBasketByUserNameCommand(userName)));
+}
+```
+
+---
+
+### 8. Docker 配置
+
+**Dockerfile** (`src/Services/Basket/Basket.API/Dockerfile`)：
+
+```dockerfile
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS base
+WORKDIR /app
+EXPOSE 8020
+
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /src
+COPY ["src/Services/Basket/Basket.API/Basket.API.csproj", "src/Services/Basket/Basket.API/"]
+RUN dotnet restore "src/Services/Basket/Basket.API/Basket.API.csproj"
+COPY . .
+RUN dotnet publish -c Release -o /app/publish
+
+FROM base AS final
+WORKDIR /app
+COPY --from=publish /app/publish .
+ENTRYPOINT ["dotnet", "Basket.API.dll"]
+```
+
+---
+
+### 9. API 端点
+
+| 方法 | 路由 | 说明 |
+|------|------|------|
+| GET | `/api/v1/Basket/{userName}` | 获取用户购物车 |
+| POST | `/api/v1/Basket` | 创建/更新购物车 |
+| DELETE | `/api/v1/Basket/{userName}` | 删除用户购物车 |
+

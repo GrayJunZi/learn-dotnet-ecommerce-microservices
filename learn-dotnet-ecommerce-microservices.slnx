@@ -10,6 +10,12 @@
   </Folder>
   <Folder Name="/src/" />
   <Folder Name="/src/Services/" />
+  <Folder Name="/src/Services/Basket/">
+    <Project Path="src/Services/Basket/Basket.API/Basket.API.csproj" />
+    <Project Path="src/Services/Basket/Basket.Application/Basket.Application.csproj" />
+    <Project Path="src/Services/Basket/Basket.Core/Basket.Core.csproj" />
+    <Project Path="src/Services/Basket/Basket.Infrastructure/Basket.Infrastructure.csproj" />
+  </Folder>
   <Folder Name="/src/Services/Catalog/">
     <Project Path="src/Services/Catalog/Catalog.API/Catalog.API.csproj" />
     <Project Path="src/Services/Catalog/Catalog.Application/Catalog.Application.csproj" />
