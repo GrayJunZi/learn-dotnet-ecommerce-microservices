@@ -12,7 +12,24 @@
     restart: always
     ports:
       - "6379:6379"
-
+        
+  discount.db:
+    container_name: discount.db
+    environment:
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=Password@123
+      - POSTGRES_DB=DiscountDb
+    restart: always
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      
   catalog.api:
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
@@ -27,7 +44,6 @@
       - "8010:8080"
       - "8011:8081"
         
-
   basket.api:
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
@@ -37,3 +53,13 @@
     ports:
       - "8020:8080"
       - "8021:8081"
+  
+  discount.api:
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - DatabaseSettings__ConnectionString=Server=discount.db;Port=5432;Database=DiscountDb;User Id=admin;Password=Password@123
+    depends_on:
+      - discount.db
+    ports:
+      - "8030:8080"
+      - "8031:8081"

@@ -698,6 +698,33 @@ COPY --from=publish /app/publish .
 ENTRYPOINT ["dotnet", "Basket.API.dll"]
 ```
 
+**docker-compose.yaml**（项目根目录）：
+
+```yaml
+services:
+  basket.db:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+
+  basket.api:
+    image: basket.api
+    build:
+      context: .
+      dockerfile: src/Services/Basket/Basket.API/Dockerfile
+    environment:
+      - CacheSettings__ConnectionString=basket.db:6379
+    depends_on:
+      - basket.db
+    ports:
+      - "8001:8020"
+```
+
+启动服务：
+```bash
+docker-compose up -d
+```
+
 ---
 
 ### 9. API 端点
@@ -708,3 +735,351 @@ ENTRYPOINT ["dotnet", "Basket.API.dll"]
 | POST | `/api/v1/Basket` | 创建/更新购物车 |
 | DELETE | `/api/v1/Basket/{userName}` | 删除用户购物车 |
 
+## 四、Discount 微服务
+
+Discount 微服务负责折扣优惠管理，采用整洁架构设计，使用 PostgreSQL 作为数据存储，并通过 gRPC 提供高性能服务调用。
+
+### 1. 项目结构
+
+```
+src/Services/Discount/
+├── Discount.API/              # API 层 - gRPC 服务、程序入口
+├── Discount.Application/      # 应用层 - CQRS 命令与查询处理、Proto 定义
+├── Discount.Core/             # 核心层 - 实体、仓储接口
+└── Discount.Infrastructure/   # 基础设施层 - 仓储实现、数据库配置
+```
+
+### 2. 项目依赖关系
+
+```
+Discount.API → Discount.Application, Discount.Infrastructure
+Discount.Infrastructure → Discount.Core
+Discount.Application → Discount.Core
+```
+
+### 3. NuGet 包依赖
+
+| 项目 | 包名 | 版本 |
+|------|------|------|
+| Discount.Application | MediatR | 14.1.0 |
+| Discount.Application | Grpc.Tools | 2.78.0 |
+| Discount.Infrastructure | Dapper | 2.1.72 |
+| Discount.Infrastructure | Npgsql | 10.0.2 |
+| Discount.Infrastructure | Grpc.AspNetCore | 2.76.0 |
+
+---
+
+### 4. 核心层 (Discount.Core)
+
+#### 4.1 实体类
+
+```csharp
+// Entities/Coupon.cs
+public class Coupon
+{
+    public int Id { get; set; }
+    public string ProductName { get; set; }
+    public string Description { get; set; }
+    public int Amount { get; set; }
+}
+```
+
+#### 4.2 仓储接口
+
+```csharp
+// Repositories/IDiscountRepository.cs
+public interface IDiscountRepository
+{
+    Task<Coupon> GetDiscount(string productName);
+    Task<bool> CreateDiscount(Coupon coupon);
+    Task<bool> UpdateDiscount(Coupon coupon);
+    Task<bool> DeleteDiscount(string productName);
+}
+```
+
+---
+
+### 5. 基础设施层 (Discount.Infrastructure)
+
+#### 5.1 数据库配置
+
+```csharp
+// Settings/DatabaseSettings.cs
+public class DatabaseSettings
+{
+    public string ConnectionString { get; set; }
+}
+```
+
+#### 5.2 仓储实现（使用 Dapper）
+
+```csharp
+// Repositories/DiscountRepository.cs
+public class DiscountRepository : IDiscountRepository
+{
+    private readonly string _connectionString;
+
+    public DiscountRepository(IOptions<DatabaseSettings> options)
+    {
+        _connectionString = options.Value.ConnectionString;
+    }
+
+    public async Task<Coupon> GetDiscount(string productName)
+    {
+        await using var connection = new NpgsqlConnection(_connectionString);
+        var coupon = await connection.QueryFirstOrDefaultAsync<Coupon>(
+            "SELECT * FROM Coupon WHERE ProductName = @ProductName", 
+            new { ProductName = productName });
+        
+        return coupon ?? new Coupon { ProductName = "No Discount", Amount = 0 };
+    }
+
+    public async Task<bool> CreateDiscount(Coupon coupon)
+    {
+        await using var connection = new NpgsqlConnection(_connectionString);
+        var affected = await connection.ExecuteAsync(
+            "INSERT INTO Coupon (ProductName, Description, Amount) VALUES (@ProductName, @Description, @Amount)",
+            coupon);
+        return affected > 0;
+    }
+}
+```
+
+#### 5.3 数据库迁移扩展
+
+```csharp
+// Settings/DbExtensions.cs
+public static class DbExtensions
+{
+    public static IHost MigrateDatabase(this IHost host)
+    {
+        using var scope = host.Services.CreateScope();
+        var databaseSettings = scope.ServiceProvider.GetRequiredService<IOptions<DatabaseSettings>>().Value;
+        
+        ApplyMigration(databaseSettings.ConnectionString);
+        return host;
+    }
+
+    private static void ApplyMigration(string connectionString)
+    {
+        using var connection = new NpgsqlConnection(connectionString);
+        connection.Open();
+        
+        using var command = new NpgsqlCommand { Connection = connection };
+        command.CommandText = "CREATE TABLE Coupon (Id SERIAL PRIMARY KEY, ProductName VARCHAR(500), Description TEXT, Amount INT)";
+        command.ExecuteNonQuery();
+    }
+}
+```
+
+---
+
+### 6. 应用层 (Discount.Application)
+
+#### 6.1 gRPC Proto 定义
+
+```protobuf
+// Protos/discount.proto
+syntax = "proto3";
+
+option csharp_namespace = "Discount.Grpc.Protos";
+
+service DiscountProtoService {
+  rpc GetDiscount(GetDiscountRequest) returns (CouponModel);
+  rpc CreateDiscount(CreateDiscountRequest) returns (CouponModel);
+  rpc UpdateDiscount(UpdateDiscountRequest) returns (CouponModel);
+  rpc DeleteDiscount(DeleteDiscountRequest) returns (DeleteDiscountResponse);
+}
+
+message GetDiscountRequest { string productName = 1; }
+
+message CouponModel {
+  int32 id = 1;
+  string productName = 2;
+  string description = 3;
+  int32 amount = 4;
+}
+
+message DeleteDiscountRequest { string productName = 1; }
+message DeleteDiscountResponse { bool success = 1; }
+```
+
+#### 6.2 DTOs
+
+```csharp
+// DTOs/CouponDto.cs
+public record CouponDto(int Id, string ProductName, string Description, int Amount);
+```
+
+#### 6.3 Query 与 Command
+
+```csharp
+// Queries/GetDiscountQuery.cs
+public record GetDiscountQuery(string ProductName) : IRequest<CouponDto>;
+
+// Commands/CreateDiscountCommand.cs
+public record CreateDiscountCommand(string ProductName, string Description, int Amount) : IRequest<CouponDto>;
+
+// Commands/UpdateDiscountCommand.cs
+public record UpdateDiscountCommand(int Id, string ProductName, string Description, int Amount) : IRequest<CouponDto>;
+
+// Commands/DeleteDiscountCommand.cs
+public record DeleteDiscountCommand(string ProductName) : IRequest<bool>;
+```
+
+#### 6.4 Handler
+
+```csharp
+// Handlers/GetDiscountHandler.cs
+public class GetDiscountHandler(IDiscountRepository discountRepository) 
+    : IRequestHandler<GetDiscountQuery, CouponDto>
+{
+    public async Task<CouponDto> Handle(GetDiscountQuery request, CancellationToken cancellationToken)
+    {
+        var coupon = await discountRepository.GetDiscount(request.ProductName);
+        return coupon.ToDto();
+    }
+}
+
+// Handlers/CreateDiscountHandler.cs
+public class CreateDiscountHandler(IDiscountRepository discountRepository)
+    : IRequestHandler<CreateDiscountCommand, CouponDto>
+{
+    public async Task<CouponDto> Handle(CreateDiscountCommand request, CancellationToken cancellationToken)
+    {
+        var coupon = request.ToEntity();
+        await discountRepository.CreateDiscount(coupon);
+        return coupon.ToDto();
+    }
+}
+```
+
+---
+
+### 7. API 层 (Discount.API)
+
+#### 7.1 Program.cs
+
+```csharp
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddMediatR(cfg => cfg.RegisterServicesFromAssemblies(
+    typeof(CreateDiscountHandler).Assembly));
+
+builder.Services.AddScoped<IDiscountRepository, DiscountRepository>();
+builder.Services.AddGrpc();
+
+builder.Services.Configure<DatabaseSettings>(
+    builder.Configuration.GetSection(nameof(DatabaseSettings)));
+
+var app = builder.Build();
+
+app.MigrateDatabase();
+app.UseRouting();
+app.MapGrpcService<DiscountService>();
+
+app.Run();
+```
+
+#### 7.2 gRPC Service
+
+```csharp
+// Services/DiscountService.cs
+public class DiscountService(IMediator mediator) : DiscountProtoService.DiscountProtoServiceBase
+{
+    public override async Task<CouponModel> GetDiscount(GetDiscountRequest request, ServerCallContext context)
+    {
+        var result = await mediator.Send(new GetDiscountQuery(request.ProductName));
+        return result.ToModel();
+    }
+
+    public override async Task<CouponModel> CreateDiscount(CreateDiscountRequest request, ServerCallContext context)
+    {
+        var result = await mediator.Send(request.Coupon.ToCreateCommand());
+        return result.ToModel();
+    }
+
+    public override async Task<CouponModel> UpdateDiscount(UpdateDiscountRequest request, ServerCallContext context)
+    {
+        var result = await mediator.Send(request.Coupon.ToUpdateCommand());
+        return result.ToModel();
+    }
+
+    public override async Task<DeleteDiscountResponse> DeleteDiscount(DeleteDiscountRequest request, ServerCallContext context)
+    {
+        var result = await mediator.Send(new DeleteDiscountCommand(request.ProductName));
+        return new DeleteDiscountResponse { Success = result };
+    }
+}
+```
+
+---
+
+### 8. Docker 配置
+
+**Dockerfile** (`src/Services/Discount/Discount.API/Dockerfile`)：
+
+```dockerfile
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS base
+WORKDIR /app
+EXPOSE 8080
+
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /src
+COPY ["src/Services/Discount/Discount.API/Discount.API.csproj", "src/Services/Discount/Discount.API/"]
+RUN dotnet restore "src/Services/Discount/Discount.API/Discount.API.csproj"
+COPY . .
+RUN dotnet publish -c Release -o /app/publish
+
+FROM base AS final
+WORKDIR /app
+COPY --from=publish /app/publish .
+ENTRYPOINT ["dotnet", "Discount.API.dll"]
+```
+
+**docker-compose.yaml**（项目根目录）：
+
+```yaml
+services:
+  discount.db:
+    image: postgres
+    environment:
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=admin123
+      - POSTGRES_DB=DiscountDb
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  discount.api:
+    image: discount.api
+    build:
+      context: .
+      dockerfile: src/Services/Discount/Discount.API/Dockerfile
+    environment:
+      - DatabaseSettings__ConnectionString=Server=discount.db;Port=5432;Database=DiscountDb;User Id=admin;Password=admin123;
+    depends_on:
+      - discount.db
+    ports:
+      - "8002:8080"
+
+volumes:
+  postgres_data:
+```
+
+启动服务：
+```bash
+docker-compose up -d
+```
+
+---
+
+### 9. gRPC 服务端点
+
+| 方法 | 服务 | 说明 |
+|------|------|------|
+| GetDiscount | DiscountProtoService | 根据产品名称获取折扣 |
+| CreateDiscount | DiscountProtoService | 创建折扣优惠 |
+| UpdateDiscount | DiscountProtoService | 更新折扣优惠 |
+| DeleteDiscount | DiscountProtoService | 删除折扣优惠 |
