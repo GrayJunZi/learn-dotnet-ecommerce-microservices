@@ -735,6 +735,177 @@ docker-compose up -d
 | POST | `/api/v1/Basket` | 创建/更新购物车 |
 | DELETE | `/api/v1/Basket/{userName}` | 删除用户购物车 |
 
+---
+
+### 10. 集成 Discount 微服务（gRPC 调用）
+
+Basket 微服务通过 gRPC 调用 Discount 微服务获取产品折扣信息，在创建购物车时自动应用折扣优惠。
+
+#### 10.1 添加 NuGet 包依赖
+
+在 `Basket.Application.csproj` 中添加 gRPC 相关包：
+
+```xml
+<ItemGroup>
+  <PackageReference Include="Grpc.AspNetCore" Version="2.76.0" />
+  <PackageReference Include="Grpc.Net.Client" Version="2.76.0" />
+  <PackageReference Include="Grpc.Tools" Version="2.78.0">
+    <PrivateAssets>all</PrivateAssets>
+    <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+  </PackageReference>
+</ItemGroup>
+```
+
+#### 10.2 添加 Proto 文件
+
+在 `Basket.Application/Protos/discount.proto` 中定义 gRPC 服务契约：
+
+```protobuf
+syntax = "proto3";
+
+option csharp_namespace = "Discount.Grpc.Protos";
+
+service DiscountProtoService {
+  rpc GetDiscount(GetDiscountRequest) returns (CouponModel);
+}
+
+message GetDiscountRequest { string productName = 1; }
+
+message CouponModel {
+  int32 id = 1;
+  string productName = 2;
+  string description = 3;
+  int32 amount = 4;
+}
+```
+
+在 `.csproj` 中引用（客户端模式）：
+
+```xml
+<ItemGroup>
+  <Protobuf Include="Protos\discount.proto" GrpcServices="Client" />
+</ItemGroup>
+```
+
+#### 10.3 创建 gRPC 配置与服务
+
+```csharp
+// Settings/GrpcSettings.cs
+namespace Basket.Application.Settings;
+
+public class GrpcSettings
+{
+    public string DiscountUrl { get; set; }
+}
+```
+
+```csharp
+// GrpcServices/DiscountGrpcService.cs
+using Discount.Grpc.Protos;
+
+namespace Basket.Application.GrpcServices;
+
+public class DiscountGrpcService(DiscountProtoService.DiscountProtoServiceClient client)
+{
+    public async Task<CouponModel> GetDiscount(string productName)
+    {
+        var request = new GetDiscountRequest { ProductName = productName };
+        return await client.GetDiscountAsync(request);
+    }
+}
+```
+
+#### 10.4 修改 Handler 应用折扣
+
+```csharp
+// Handlers/CreateShoppingCartHandler.cs
+public class CreateShoppingCartHandler(
+    IBasketRepository basketRepository,
+    DiscountGrpcService discountGrpcService) : IRequestHandler<CreateShoppingCartCommand, ShoppingCartResponse>
+{
+    public async Task<ShoppingCartResponse> Handle(CreateShoppingCartCommand request,
+        CancellationToken cancellationToken)
+    {
+        // 为每个商品获取折扣并应用
+        foreach (var item in request.Items)
+        {
+            var coupon = await discountGrpcService.GetDiscount(item.ProductName);
+            item.Price -= coupon.Amount;
+        }
+
+        var shoppingCart = request.ToEntity();
+        var updatedCart = await basketRepository.UpdateBasket(shoppingCart);
+        return updatedCart.ToResponse();
+    }
+}
+```
+
+#### 10.5 注册 gRPC 客户端
+
+```csharp
+// Basket.API/Program.cs
+using Basket.Application.GrpcServices;
+using Basket.Application.Settings;
+using Discount.Grpc.Protos;
+
+// 注册 gRPC 配置
+builder.Services.Configure<GrpcSettings>(
+    builder.Configuration.GetSection(nameof(GrpcSettings)));
+
+// 注册 gRPC 客户端
+builder.Services.AddGrpcClient<DiscountProtoService.DiscountProtoServiceClient>((sp, options) =>
+{
+    var grpcSettings = sp.GetRequiredService<IOptions<GrpcSettings>>().Value;
+    options.Address = new Uri(grpcSettings.DiscountUrl);
+});
+
+builder.Services.AddScoped<DiscountGrpcService>();
+```
+
+#### 10.6 配置文件
+
+**appsettings.json**：
+
+```json
+{
+  "CacheSettings": {
+    "ConnectionString": "localhost:6379"
+  },
+  "GrpcSettings": {
+    "DiscountUrl": "http://localhost:8030"
+  }
+}
+```
+
+#### 10.7 服务调用流程
+
+```
+用户创建购物车
+       ↓
+CreateShoppingCartHandler
+       ↓
+遍历商品 → gRPC 调用 DiscountGrpcService.GetDiscount()
+       ↓
+商品价格 -= 折扣金额
+       ↓
+保存购物车到 Redis
+```
+
+#### 10.8 更新 Docker Compose
+
+```yaml
+services:
+  basket.api:
+    environment:
+      - CacheSettings__ConnectionString=basket.db:6379
+      - GrpcSettings__DiscountUrl=http://discount.api:8080
+    depends_on:
+      - basket.db
+      - discount.api
+```
+
+---
+
 ## 四、Discount 微服务
 
 Discount 微服务负责折扣优惠管理，采用整洁架构设计，使用 PostgreSQL 作为数据存储，并通过 gRPC 提供高性能服务调用。
@@ -1083,3 +1254,199 @@ docker-compose up -d
 | CreateDiscount | DiscountProtoService | 创建折扣优惠 |
 | UpdateDiscount | DiscountProtoService | 更新折扣优惠 |
 | DeleteDiscount | DiscountProtoService | 删除折扣优惠 |
+
+## 五、在 Basket 微服务中使用 Discount 微服务
+
+Basket 微服务通过 gRPC 调用 Discount 微服务获取产品折扣信息，在创建购物车时自动应用折扣优惠。
+
+### 1. 添加 NuGet 包依赖
+
+在 `Basket.Application.csproj` 中添加 gRPC 相关包：
+
+```xml
+<ItemGroup>
+  <PackageReference Include="Grpc.AspNetCore" Version="2.76.0" />
+  <PackageReference Include="Grpc.Net.Client" Version="2.76.0" />
+  <PackageReference Include="Grpc.Tools" Version="2.78.0">
+    <PrivateAssets>all</PrivateAssets>
+    <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+  </PackageReference>
+</ItemGroup>
+```
+
+### 2. 添加 Proto 文件
+
+在 `Basket.Application/Protos/discount.proto` 中定义 gRPC 服务契约（与 Discount 服务一致）：
+
+```protobuf
+syntax = "proto3";
+
+option csharp_namespace = "Discount.Grpc.Protos";
+
+service DiscountProtoService {
+  rpc GetDiscount(GetDiscountRequest) returns (CouponModel);
+  rpc CreateDiscount(CreateDiscountRequest) returns (CouponModel);
+  rpc UpdateDiscount(UpdateDiscountRequest) returns (CouponModel);
+  rpc DeleteDiscount(DeleteDiscountRequest) returns (DeleteDiscountResponse);
+}
+
+message GetDiscountRequest { string productName = 1; }
+
+message CouponModel {
+  int32 id = 1;
+  string productName = 2;
+  string description = 3;
+  int32 amount = 4;
+}
+```
+
+在 `.csproj` 中引用 Proto 文件（客户端模式）：
+
+```xml
+<ItemGroup>
+  <Protobuf Include="Protos\discount.proto" GrpcServices="Client" />
+</ItemGroup>
+```
+
+### 3. 创建 gRPC 配置
+
+```csharp
+// Settings/GrpcSettings.cs
+namespace Basket.Application.Settings;
+
+public class GrpcSettings
+{
+    public string DiscountUrl { get; set; }
+}
+```
+
+### 4. 创建 gRPC 服务客户端
+
+```csharp
+// GrpcServices/DiscountGrpcService.cs
+using Discount.Grpc.Protos;
+
+namespace Basket.Application.GrpcServices;
+
+public class DiscountGrpcService(DiscountProtoService.DiscountProtoServiceClient discountProtoServiceClient)
+{
+    public async Task<CouponModel> GetDiscount(string productName)
+    {
+        var discountRequest = new GetDiscountRequest { ProductName = productName };
+        return await discountProtoServiceClient.GetDiscountAsync(discountRequest);
+    }
+}
+```
+
+### 5. 修改 DTO
+
+```csharp
+// DTOs/BasketDto.cs
+public record CreateShoppingCartItemDto
+{
+    public string ProductId { get; set; }
+    public string ProductName { get; set; }
+    public string ImageFile { get; set; }
+    public decimal Price { get; set; }
+    public int Quantity { get; set; }
+}
+```
+
+### 6. 修改 Handler 应用折扣
+
+```csharp
+// Handlers/CreateShoppingCartHandler.cs
+public class CreateShoppingCartHandler(
+    IBasketRepository basketRepository,
+    DiscountGrpcService discountGrpcService) : IRequestHandler<CreateShoppingCartCommand, ShoppingCartResponse>
+{
+    public async Task<ShoppingCartResponse> Handle(CreateShoppingCartCommand request,
+        CancellationToken cancellationToken)
+    {
+        // 为每个商品获取折扣并应用
+        foreach (var item in request.Items)
+        {
+            var coupon = await discountGrpcService.GetDiscount(item.ProductName);
+            item.Price -= coupon.Amount;
+        }
+
+        var shoppingCart = request.ToEntity();
+        var updatedCart = await basketRepository.UpdateBasket(shoppingCart);
+        return updatedCart.ToResponse();
+    }
+}
+```
+
+### 7. 在 Program.cs 注册服务
+
+```csharp
+// Basket.API/Program.cs
+using Basket.Application.GrpcServices;
+using Basket.Application.Settings;
+using Discount.Grpc.Protos;
+
+// 注册 gRPC 配置
+builder.Services.Configure<GrpcSettings>(
+    builder.Configuration.GetSection(nameof(GrpcSettings)));
+
+// 注册 gRPC 客户端
+builder.Services.AddGrpcClient<DiscountProtoService.DiscountProtoServiceClient>((sp, options) =>
+{
+    var grpcSettings = sp.GetRequiredService<IOptions<GrpcSettings>>().Value;
+    options.Address = new Uri(grpcSettings.DiscountUrl);
+});
+
+builder.Services.AddScoped<DiscountGrpcService>();
+```
+
+### 8. 配置文件
+
+**appsettings.json**：
+
+```json
+{
+  "CacheSettings": {
+    "ConnectionString": "localhost:6379"
+  },
+  "GrpcSettings": {
+    "DiscountUrl": "http://localhost:8030"
+  }
+}
+```
+
+### 9. 服务调用流程
+
+```
+用户创建购物车
+       ↓
+CreateShoppingCartHandler
+       ↓
+遍历购物车商品 → 调用 DiscountGrpcService.GetDiscount()
+       ↓
+Discount 微服务返回折扣金额
+       ↓
+商品价格 -= 折扣金额
+       ↓
+保存购物车到 Redis
+```
+
+### 10. 修改 Docker Compose 配置
+
+**docker-compose.yaml**（项目根目录）：
+
+```yaml
+services:
+  basket.api:
+    image: basket.api
+    build:
+      context: .
+      dockerfile: src/Services/Basket/Basket.API/Dockerfile
+    environment:
+      - CacheSettings__ConnectionString=basket.db:6379
+      - GrpcSettings__DiscountUrl=http://discount.api:8080
+    depends_on:
+      - basket.db
+      - discount.api
+    ports:
+      - "8001:8020"
+```

@@ -1,8 +1,12 @@
 using System.Reflection;
+using Basket.Application.GrpcServices;
 using Basket.Application.Handlers;
+using Basket.Application.Settings;
 using Basket.Core.Repositories;
 using Basket.Infrastructure.Repositories;
 using Basket.Infrastructure.Settings;
+using Discount.Grpc.Protos;
+using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -32,6 +36,18 @@ builder.Services.AddStackExchangeRedisCache(options =>
         .GetSection(nameof(CacheSettings))
         .GetValue<string>("ConnectionString");
 });
+
+
+builder.Services.Configure<GrpcSettings>(
+    builder.Configuration.GetSection(nameof(GrpcSettings)));
+
+builder.Services.AddGrpcClient<DiscountProtoService.DiscountProtoServiceClient>((sp,options) =>
+{
+    var grpcSettings = sp.GetRequiredService<IOptions<GrpcSettings>>().Value;
+    options.Address = new Uri(grpcSettings.DiscountUrl);
+});
+builder.Services.AddScoped<DiscountGrpcService>();
+
 
 var app = builder.Build();
 

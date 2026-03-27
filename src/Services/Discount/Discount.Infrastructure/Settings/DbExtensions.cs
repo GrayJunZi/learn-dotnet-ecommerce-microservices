@@ -12,8 +12,9 @@ public static class DbExtensions
     {
         using var scope = host.Services.CreateScope();
         var services = scope.ServiceProvider;
-        var loggerFactory = services.GetRequiredService<ILoggerFactory>();
-        var logger = loggerFactory.CreateLogger("DbExtensions");
+        // var loggerFactory = services.GetRequiredService<ILoggerFactory>();
+        // var logger = loggerFactory.CreateLogger("DbExtensions");
+        var logger = services.GetRequiredService<ILogger>();
         var databaseSettings = services.GetRequiredService<IOptions<DatabaseSettings>>().Value;
 
         try
