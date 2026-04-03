@@ -30,6 +30,22 @@
       timeout: 5s
       retries: 5
       
+  ordering.db:
+    container_name: ordering.db
+    environment:
+      - SA_PASSWORD=Password@123
+      - ACCEPT_EULA=Y
+    restart: always
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver_data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL","/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P 'Password@123' -Q 'select 1'"]
+      interval: 10s
+      timeout: 10s
+      retries: 3
+      
   catalog.api:
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
@@ -64,3 +80,13 @@
     ports:
       - "8030:8080"
       - "8031:8081"
+
+  ordering.api:
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - DatabaseSettings__ConnectionString=Server=ordering.db;Port=1433;Database=OrderingDb;User Id=admin;Password=Password@123
+    depends_on:
+      - ordering.db
+    ports:
+      - "8040:8080"
+      - "8041:8081"

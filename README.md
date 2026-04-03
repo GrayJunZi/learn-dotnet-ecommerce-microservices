@@ -1450,3 +1450,644 @@ services:
     ports:
       - "8001:8020"
 ```
+
+## 六、Ordering 微服务
+
+Ordering 微服务负责订单管理，采用整洁架构设计，使用 SQL Server 作为数据存储，实现完整的 CQRS 模式。
+
+### 1. 项目结构
+
+```
+src/Services/Ordering/
+├── Ordering.API/              # API 层 - 控制器、程序入口
+├── Ordering.Application/      # 应用层 - CQRS 命令与查询处理
+├── Ordering.Core/             # 核心层 - 实体、仓储接口
+└── Ordering.Infrastructure/   # 基础设施层 - 仓储实现、数据库配置
+```
+
+### 2. 项目依赖关系
+
+```
+Ordering.API → Ordering.Application, Ordering.Infrastructure
+Ordering.Infrastructure → Ordering.Application
+Ordering.Application → Ordering.Core
+```
+
+### 3. NuGet 包依赖
+
+| 项目 | 包名 | 版本 |
+|------|------|------|
+| Ordering.API | Microsoft.AspNetCore.OpenApi | 10.0.0 |
+| Ordering.Application | FluentValidation | 11.11.0 |
+| Ordering.Core | Microsoft.EntityFrameworkCore | 10.0.0 |
+| Ordering.Infrastructure | Microsoft.EntityFrameworkCore.SqlServer | 10.0.0 |
+
+---
+
+### 4. 核心层 (Ordering.Core)
+
+#### 4.1 实体基类
+
+```csharp
+// Entities/EntityBase.cs
+public abstract class EntityBase
+{
+    public int Id { get; set; }
+    public DateTime CreatedDate { get; set; } = DateTime.UtcNow;
+    public DateTime? LastModifiedDate { get; set; }
+}
+```
+
+#### 4.2 订单实体
+
+```csharp
+// Entities/Order.cs
+public class Order : EntityBase
+{
+    public string? UserName { get; set; }
+    public decimal? TotalPrice { get; set; }
+    public string? Name { get; set; }
+    public string? EmailAddress { get; set; }
+    public string? AddressLine { get; set; }
+    public string? Country { get; set; }
+    public string? State { get; set; }
+    public string? ZipCode { get; set; }
+    public string? CardName { get; set; }
+    public string? CardNumber { get; set; }
+    public string? CardExpiration { get; set; }
+    public string? CardCvv { get; set; }
+    public int? PaymentMethod { get; set; }
+}
+```
+
+#### 4.3 仓储接口
+
+```csharp
+// Repositories/IAsyncRepository.cs
+public interface IAsyncRepository<T> where T : EntityBase
+{
+    Task<T?> GetByIdAsync(int id);
+    Task<IReadOnlyList<T>> GetAllAsync();
+    Task<T> AddAsync(T entity);
+    Task UpdateAsync(T entity);
+    Task DeleteAsync(T entity);
+}
+
+// Repositories/IOrderRepository.cs
+public interface IOrderRepository : IAsyncRepository<Order>
+{
+    Task<IReadOnlyList<Order>> GetOrdersByUserNameAsync(string userName);
+}
+```
+
+---
+
+### 5. 基础设施层 (Ordering.Infrastructure)
+
+#### 5.1 数据库配置
+
+```csharp
+// Settings/DatabaseSettings.cs
+public class DatabaseSettings
+{
+    public string ConnectionString { get; set; } = string.Empty;
+}
+```
+
+#### 5.2 DbContext 配置
+
+```csharp
+// Data/OrderContext.cs
+public class OrderContext : DbContext
+{
+    public OrderContext(DbContextOptions<OrderContext> options) : base(options) { }
+
+    public DbSet<Order> Orders { get; set; }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Order>().HasKey(o => o.Id);
+        
+        modelBuilder.Entity<Order>().Property(o => o.TotalPrice)
+            .HasColumnType("decimal(18,2)");
+            
+        base.OnModelCreating(modelBuilder);
+    }
+}
+```
+
+#### 5.3 仓储实现
+
+```csharp
+// Repositories/RepositoryBase.cs
+public class RepositoryBase<T> : IAsyncRepository<T> where T : EntityBase
+{
+    protected readonly OrderContext _dbContext;
+
+    public RepositoryBase(OrderContext dbContext)
+    {
+        _dbContext = dbContext;
+    }
+
+    public async Task<T?> GetByIdAsync(int id)
+    {
+        return await _dbContext.Set<T>().FindAsync(id);
+    }
+
+    public async Task<IReadOnlyList<T>> GetAllAsync()
+    {
+        return await _dbContext.Set<T>().ToListAsync();
+    }
+
+    public async Task<T> AddAsync(T entity)
+    {
+        _dbContext.Set<T>().Add(entity);
+        await _dbContext.SaveChangesAsync();
+        return entity;
+    }
+
+    public async Task UpdateAsync(T entity)
+    {
+        _dbContext.Entry(entity).State = EntityState.Modified;
+        await _dbContext.SaveChangesAsync();
+    }
+
+    public async Task DeleteAsync(T entity)
+    {
+        _dbContext.Set<T>().Remove(entity);
+        await _dbContext.SaveChangesAsync();
+    }
+}
+
+// Repositories/OrderRepository.cs
+public class OrderRepository : RepositoryBase<Order>, IOrderRepository
+{
+    public OrderRepository(OrderContext dbContext) : base(dbContext) { }
+
+    public async Task<IReadOnlyList<Order>> GetOrdersByUserNameAsync(string userName)
+    {
+        return await _dbContext.Orders
+            .Where(o => o.UserName == userName)
+            .ToListAsync();
+    }
+}
+```
+
+---
+
+### 6. 应用层 (Ordering.Application)
+
+#### 6.1 CQRS 抽象接口
+
+```csharp
+// Abstractions/ICommand.cs
+public interface ICommand : IRequest<Result<int>>
+{
+}
+
+// Abstractions/ICommandHandler.cs
+public interface ICommandHandler<in TCommand> : IRequestHandler<TCommand, Result<int>>
+    where TCommand : ICommand
+{
+}
+
+// Abstractions/IQuery.cs
+public interface IQuery<TResponse> : IRequest<Result<TResponse>>
+{
+}
+
+// Abstractions/IQueryHandler.cs
+public interface IQueryHandler<in TQuery, TResponse> : IRequestHandler<TQuery, Result<TResponse>>
+    where TQuery : IQuery<TResponse>
+{
+}
+```
+
+#### 6.2 DTOs
+
+```csharp
+// DTOs/OrderingDto.cs
+public record OrderingDto
+{
+    public int Id { get; init; }
+    public string? UserName { get; init; }
+    public decimal? TotalPrice { get; init; }
+    public string? Name { get; init; }
+    public string? EmailAddress { get; init; }
+    public string? AddressLine { get; init; }
+    public string? Country { get; init; }
+    public string? State { get; init; }
+    public string? ZipCode { get; init; }
+    public string? CardName { get; init; }
+    public string? CardNumber { get; init; }
+    public string? CardExpiration { get; init; }
+    public string? CardCvv { get; init; }
+    public int? PaymentMethod { get; init; }
+    public DateTime CreatedDate { get; init; }
+}
+```
+
+#### 6.3 Query 与 Handler
+
+**查询定义**：
+
+```csharp
+// Orders/GetOrders/GetOrderListQuery.cs
+public record GetOrderListQuery : IQuery<IReadOnlyList<OrderingDto>>;
+```
+
+**查询处理器**：
+
+```csharp
+// Orders/GetOrders/GetOrderListHandler.cs
+public class GetOrderListHandler : IQueryHandler<GetOrderListQuery, IReadOnlyList<OrderingDto>>
+{
+    private readonly IOrderRepository _orderRepository;
+
+    public GetOrderListHandler(IOrderRepository orderRepository)
+    {
+        _orderRepository = orderRepository;
+    }
+
+    public async Task<Result<IReadOnlyList<OrderingDto>>> Handle(GetOrderListQuery request, CancellationToken cancellationToken)
+    {
+        var orders = await _orderRepository.GetAllAsync();
+        var orderDtos = orders.Select(o => o.ToDto()).ToList();
+        return Result<IReadOnlyList<OrderingDto>>.Success(orderDtos);
+    }
+}
+```
+
+#### 6.4 Command 与 Handler
+
+**命令定义**：
+
+```csharp
+// Orders/CreateOrder/CreateOrderCommand.cs
+public record CreateOrderCommand : ICommand
+{
+    public string? UserName { get; init; }
+    public decimal? TotalPrice { get; init; }
+    public string? Name { get; init; }
+    public string? EmailAddress { get; init; }
+    public string? AddressLine { get; init; }
+    public string? Country { get; init; }
+    public string? State { get; init; }
+    public string? ZipCode { get; init; }
+    public string? CardName { get; init; }
+    public string? CardNumber { get; init; }
+    public string? CardExpiration { get; init; }
+    public string? CardCvv { get; init; }
+    public int? PaymentMethod { get; init; }
+}
+```
+
+**命令处理器**：
+
+```csharp
+// Orders/CreateOrder/CreateOrderHandler.cs
+public class CreateOrderHandler : ICommandHandler<CreateOrderCommand>
+{
+    private readonly IOrderRepository _orderRepository;
+
+    public CreateOrderHandler(IOrderRepository orderRepository)
+    {
+        _orderRepository = orderRepository;
+    }
+
+    public async Task<Result<int>> Handle(CreateOrderCommand request, CancellationToken cancellationToken)
+    {
+        var order = new Order
+        {
+            UserName = request.UserName,
+            TotalPrice = request.TotalPrice,
+            Name = request.Name,
+            EmailAddress = request.EmailAddress,
+            AddressLine = request.AddressLine,
+            Country = request.Country,
+            State = request.State,
+            ZipCode = request.ZipCode,
+            CardName = request.CardName,
+            CardNumber = request.CardNumber,
+            CardExpiration = request.CardExpiration,
+            CardCvv = request.CardCvv,
+            PaymentMethod = request.PaymentMethod
+        };
+
+        var createdOrder = await _orderRepository.AddAsync(order);
+        return Result<int>.Success(createdOrder.Id);
+    }
+}
+```
+
+#### 6.5 验证实现
+
+```csharp
+// Validators/CreateOrderCommandValidator.cs
+public class CreateOrderCommandValidator : AbstractValidator<CreateOrderCommand>
+{
+    public CreateOrderCommandValidator()
+    {
+        RuleFor(x => x.UserName)
+            .NotEmpty().WithMessage("用户名不能为空")
+            .MaximumLength(50).WithMessage("用户名长度不能超过50个字符");
+
+        RuleFor(x => x.TotalPrice)
+            .GreaterThan(0).WithMessage("订单总价必须大于0");
+
+        RuleFor(x => x.EmailAddress)
+            .NotEmpty().WithMessage("邮箱地址不能为空")
+            .EmailAddress().WithMessage("邮箱地址格式不正确");
+
+        RuleFor(x => x.AddressLine)
+            .NotEmpty().WithMessage("地址不能为空")
+            .MaximumLength(200).WithMessage("地址长度不能超过200个字符");
+    }
+}
+```
+
+#### 6.6 异常处理
+
+```csharp
+// Exceptions/OrderNotFoundException.cs
+public class OrderNotFoundException : Exception
+{
+    public OrderNotFoundException(int orderId) 
+        : base($"订单ID {orderId} 未找到")
+    {
+    }
+}
+```
+
+#### 6.7 行为装饰器
+
+```csharp
+// Behaviors/ValidationCommandHandlerDecorator.cs
+public class ValidationCommandHandlerDecorator<TCommand, TResponse> 
+    : ICommandHandler<TCommand, TResponse>
+    where TCommand : ICommand
+{
+    private readonly ICommandHandler<TCommand, TResponse> _inner;
+    private readonly IValidator<TCommand> _validator;
+
+    public ValidationCommandHandlerDecorator(
+        ICommandHandler<TCommand, TResponse> inner,
+        IValidator<TCommand> validator)
+    {
+        _inner = inner;
+        _validator = validator;
+    }
+
+    public async Task<TResponse> Handle(TCommand request, CancellationToken cancellationToken)
+    {
+        var validationResult = await _validator.ValidateAsync(request, cancellationToken);
+        if (!validationResult.IsValid)
+        {
+            throw new ValidationException(validationResult.Errors);
+        }
+
+        return await _inner.Handle(request, cancellationToken);
+    }
+}
+```
+
+---
+
+### 7. API 层 (Ordering.API)
+
+#### 7.1 控制器实现
+
+```csharp
+// Controllers/OrderController.cs
+[ApiController]
+[Route("api/[controller]")]
+public class OrderController : ControllerBase
+{
+    private readonly IMediator _mediator;
+
+    public OrderController(IMediator mediator)
+    {
+        _mediator = mediator;
+    }
+
+    [HttpGet]
+    public async Task<ActionResult<IReadOnlyList<OrderingDto>>> GetOrders()
+    {
+        var query = new GetOrderListQuery();
+        var result = await _mediator.Send(query);
+        
+        if (result.IsSuccess)
+        {
+            return Ok(result.Value);
+        }
+        
+        return BadRequest(result.Error);
+    }
+
+    [HttpPost]
+    public async Task<ActionResult<int>> CreateOrder(CreateOrderCommand command)
+    {
+        var result = await _mediator.Send(command);
+        
+        if (result.IsSuccess)
+        {
+            return CreatedAtAction(nameof(GetOrders), new { id = result.Value }, result.Value);
+        }
+        
+        return BadRequest(result.Error);
+    }
+}
+```
+
+#### 7.2 依赖注入扩展
+
+```csharp
+// Extensions/ServiceCollectionExtensions.cs
+public static class ServiceCollectionExtensions
+{
+    public static IServiceCollection AddOrderingServices(this IServiceCollection services, IConfiguration configuration)
+    {
+        services.Configure<DatabaseSettings>(configuration.GetSection(nameof(DatabaseSettings)));
+
+        services.AddDbContext<OrderContext>((sp, options) =>
+        {
+            var databaseSettings = sp.GetRequiredService<IOptions<DatabaseSettings>>().Value;
+            options.UseSqlServer(databaseSettings.ConnectionString,
+                sqlOptions =>
+                {
+                    sqlOptions.EnableRetryOnFailure(5, TimeSpan.FromSeconds(10), null);
+                    sqlOptions.MigrationsAssembly("Ordering.Infrastructure");
+                });
+        });
+
+        services.AddScoped(typeof(IAsyncRepository<>), typeof(RepositoryBase<>));
+        services.AddScoped<IOrderRepository, OrderRepository>();
+
+        services.Scan(scan => scan
+            .FromAssemblies(typeof(ICommandHandler<>).Assembly)
+            .AddClasses(classes => classes.AssignableTo(typeof(ICommandHandler<>)))
+            .AsImplementedInterfaces()
+            .WithScopedLifetime()
+        );
+
+        services.AddValidatorsFromAssembly(typeof(CreateOrderCommandValidator).Assembly);
+        services.Decorate(typeof(ICommandHandler<,>), typeof(ValidationCommandHandlerDecorator<,>));
+        
+        return services;
+    }
+}
+```
+
+#### 7.3 数据库扩展
+
+```csharp
+// Extensions/DbExtension.cs
+public static class DbExtension
+{
+    public static void MigrateDatabase<TContext>(this IApplicationBuilder app, 
+        Action<TContext, IServiceProvider> seeder) where TContext : DbContext
+    {
+        using var scope = app.ApplicationServices.CreateScope();
+        var services = scope.ServiceProvider;
+        var context = services.GetRequiredService<TContext>();
+        
+        context.Database.Migrate();
+        seeder(context, services);
+    }
+}
+```
+
+#### 7.4 种子数据
+
+```csharp
+// Data/OrderContextSeed.cs
+public class OrderContextSeed
+{
+    public static async Task SeedAsync(OrderContext context, ILogger<OrderContextSeed> logger)
+    {
+        if (!context.Orders.Any())
+        {
+            context.Orders.AddRange(GetPreconfiguredOrders());
+            await context.SaveChangesAsync();
+            logger.LogInformation("订单种子数据已插入数据库");
+        }
+    }
+
+    private static IEnumerable<Order> GetPreconfiguredOrders()
+    {
+        return new List<Order>
+        {
+            new Order
+            {
+                UserName = "testuser",
+                TotalPrice = 99.99m,
+                Name = "张三",
+                EmailAddress = "zhangsan@example.com",
+                AddressLine = "北京市朝阳区",
+                Country = "中国",
+                State = "北京",
+                ZipCode = "100000",
+                CardName = "张三",
+                CardNumber = "1234567890123456",
+                CardExpiration = "12/25",
+                CardCvv = "123",
+                PaymentMethod = 1
+            }
+        };
+    }
+}
+```
+
+#### 7.5 Program.cs 配置
+
+```csharp
+// Program.cs
+using Ordering.API.Extensions;
+using Ordering.Infrastructure.Data;
+
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddControllers();
+builder.Services.AddOpenApi();
+builder.Services.AddOrderingServices(builder.Configuration);
+
+var app = builder.Build();
+
+app.MigrateDatabase<OrderContext>((context, services) =>
+{
+    var logger = services.GetRequiredService<ILogger<OrderContextSeed>>();
+    OrderContextSeed.SeedAsync(context, logger).Wait();
+});
+
+if (app.Environment.IsDevelopment())
+{
+    app.MapOpenApi();
+}
+
+app.UseHttpsRedirection();
+app.Run();
+```
+
+---
+
+### 8. 数据库迁移
+
+Ordering 微服务使用 Entity Framework Core 进行数据库迁移管理：
+
+```bash
+# 创建迁移
+dotnet ef migrations add InitialCreate --project src/Services/Ordering/Ordering.Infrastructure --startup-project src/Services/Ordering/Ordering.API
+
+# 应用迁移
+dotnet ef database update --project src/Services/Ordering/Ordering.Infrastructure --startup-project src/Services/Ordering/Ordering.API
+```
+
+**迁移文件位置**：`Ordering.Infrastructure/Migrations/`
+
+---
+
+### 9. 配置示例
+
+#### 9.1 appsettings.json
+
+```json
+{
+  "DatabaseSettings": {
+    "ConnectionString": "Server=localhost;Database=OrderDb;Trusted_Connection=true;TrustServerCertificate=true;"
+  },
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  }
+}
+```
+
+#### 9.2 Dockerfile
+
+```dockerfile
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS base
+WORKDIR /app
+EXPOSE 8080
+
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /src
+COPY ["src/Services/Ordering/Ordering.API/Ordering.API.csproj", "src/Services/Ordering/Ordering.API/"]
+COPY ["src/Services/Ordering/Ordering.Application/Ordering.Application.csproj", "src/Services/Ordering/Ordering.Application/"]
+COPY ["src/Services/Ordering/Ordering.Core/Ordering.Core.csproj", "src/Services/Ordering/Ordering.Core/"]
+COPY ["src/Services/Ordering/Ordering.Infrastructure/Ordering.Infrastructure.csproj", "src/Services/Ordering/Ordering.Infrastructure/"]
+RUN dotnet restore "src/Services/Ordering/Ordering.API/Ordering.API.csproj"
+
+COPY . .
+WORKDIR "/src/src/Services/Ordering/Ordering.API"
+RUN dotnet build "Ordering.API.csproj" -c Release -o /app/build
+
+FROM build AS publish
+RUN dotnet publish "Ordering.API.csproj" -c Release -o /app/publish
+
+FROM base AS final
+WORKDIR /app
+COPY --from=publish /app/publish .
+ENTRYPOINT ["dotnet", "Ordering.API.dll"]
+```

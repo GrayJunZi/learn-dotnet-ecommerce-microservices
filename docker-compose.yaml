@@ -8,6 +8,9 @@
   discount.db:
     image: postgres
 
+  ordering.db:
+    image: mcr.microsoft.com/mssql/server
+
   catalog.api:
     image: catalog.api
     build:
@@ -26,6 +29,13 @@
       context: .
       dockerfile: src/Services/Discount/Discount.API/Dockerfile
 
+  ordering.api:
+    image: ordering.api
+    build:
+      context: .
+      dockerfile: src/Services/Ordering/Ordering.API/Dockerfile
+
 volumes:
   mongo_data:
   postgres_data:
+  sqlserver_data:

@@ -1,0 +1,20 @@
+﻿using Ordering.Application.Abstractions;
+
+namespace Ordering.Application.Orders.CreateOrder;
+
+public class CreateOrderCommand : ICommand<int>
+{
+    public string? UserName { get; init; }
+    public decimal? TotalPrice { get; init; }
+    public string? Name { get; init; }
+    public string? EmailAddress { get; init; }
+    public string? AddressLine { get; init; }
+    public string? Country { get; init; }
+    public string? State { get; init; }
+    public string? ZipCode { get; init; }
+    public string? CardName { get; init; }
+    public string? CardNumber { get; init; }
+    public string? CardExpiration { get; init; }
+    public string? CardCvv { get; init; }
+    public int? PaymentMethod { get; init; }
+}
