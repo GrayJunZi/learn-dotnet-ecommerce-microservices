@@ -1,4 +1,5 @@
-﻿using Basket.Application.Command;
+﻿using Basket.Application.Commands;
+using Basket.Application.DTOs;
 using Basket.Application.Queries;
 using MediatR;
 using Microsoft.AspNetCore.Mvc;
@@ -20,7 +21,7 @@ public class BasketController(IMediator mediator) : ControllerBase
     [HttpPost]
     public async Task<IActionResult> CreateBasket([FromBody] CreateShoppingCartCommand command)
     {
-        var result = await  mediator.Send(command);
+        var result = await mediator.Send(command);
         return Ok(result);
     }
 
@@ -30,5 +31,12 @@ public class BasketController(IMediator mediator) : ControllerBase
         var command = new DeleteBasketByUserNameCommand(userName);
         var result = await mediator.Send(command);
         return Ok(result);
+    }
+
+    [HttpPost("[action]")]
+    public async Task<IActionResult> Checkout([FromBody] BasketCheckoutDto basketCheckoutDto)
+    {
+        var result = await mediator.Send(new BasketCheckoutCommand(basketCheckoutDto));
+        return Accepted();
     }
 }

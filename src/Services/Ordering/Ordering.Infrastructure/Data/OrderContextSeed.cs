@@ -32,7 +32,7 @@ public class OrderContextSeed
                 CardName = "Test User",
                 CardNumber = "4111111111111111",
                 CardExpiration = "12/25",
-                CardCvv = "123",
+                Cvv = "123",
                 PaymentMethod = 1,
                 ModifiedBy = "test",
                 ModifiedDate =  DateTime.UtcNow
@@ -50,7 +50,7 @@ public class OrderContextSeed
                 CardName = "Alice Smith",
                 CardNumber = "5555555555554444",
                 CardExpiration = "06/24",
-                CardCvv = "456",
+                Cvv = "456",
                 PaymentMethod = 2
             },
             new()
@@ -66,7 +66,7 @@ public class OrderContextSeed
                 CardName = "Bob Johnson",
                 CardNumber = "378282246310005",
                 CardExpiration = "03/26",
-                CardCvv = "789",
+                Cvv = "789",
                 PaymentMethod = 1
             },
             new()
@@ -82,7 +82,7 @@ public class OrderContextSeed
                 CardName = "Charlie Brown",
                 CardNumber = "30569309025904",
                 CardExpiration = "09/25",
-                CardCvv = "321",
+                Cvv = "321",
                 PaymentMethod = 3
             }
         };

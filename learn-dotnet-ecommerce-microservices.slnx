@@ -9,6 +9,9 @@
     <File Path="docker-compose.yaml" />
   </Folder>
   <Folder Name="/src/" />
+  <Folder Name="/src/Infrastructure/">
+    <Project Path="src/Infrastructure/EventBus.Messages/EventBus.Messages.csproj" />
+  </Folder>
   <Folder Name="/src/Services/" />
   <Folder Name="/src/Services/Basket/">
     <Project Path="src/Services/Basket/Basket.API/Basket.API.csproj" />

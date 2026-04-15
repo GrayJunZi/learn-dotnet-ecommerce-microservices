@@ -28,7 +28,7 @@ namespace Ordering.Infrastructure.Migrations
                     CardName = table.Column<string>(type: "nvarchar(max)", nullable: true),
                     CardNumber = table.Column<string>(type: "nvarchar(max)", nullable: true),
                     CardExpiration = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    CardCvv = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                    Cvv = table.Column<string>(type: "nvarchar(max)", nullable: true),
                     PaymentMethod = table.Column<int>(type: "int", nullable: true),
                     CreatedBy = table.Column<string>(type: "nvarchar(max)", nullable: true),
                     CreatedDate = table.Column<DateTime>(type: "datetime2", nullable: true),

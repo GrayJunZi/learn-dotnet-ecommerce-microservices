@@ -1,4 +1,4 @@
-﻿services:
+services:
   catalog.db:
     container_name: catalog.db
     restart: always
@@ -46,6 +46,13 @@
       timeout: 10s
       retries: 3
       
+  rabbitmq:
+    container_name: rabbitmq
+    restart: always
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+      
   catalog.api:
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
@@ -65,8 +72,10 @@
       - ASPNETCORE_ENVIRONMENT=Development
       - CacheSettings__ConnectionString=basket.db:6379
       - GrpcSettings__DiscountUrl=http://discount.api:8080
+      - EventBusSettings__HostAddress=amqp://guest:guest@rabbitmq:5672/
     depends_on:
       - basket.db
+      - rabbitmq
     ports:
       - "8020:8080"
       - "8021:8081"
@@ -84,9 +93,11 @@
   ordering.api:
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
-      - DatabaseSettings__ConnectionString=Server=ordering.db;Port=1433;Database=OrderingDb;User Id=admin;Password=Password@123
+      - DatabaseSettings__ConnectionString=Server=ordering.db;Port=1433;Database=OrderingDb;User Id=sa;Password=Password@123
+      - EventBusSettings__HostAddress=amqp://guest:guest@rabbitmq:5672/
     depends_on:
       - ordering.db
+      - rabbitmq
     ports:
       - "8040:8080"
       - "8041:8081"

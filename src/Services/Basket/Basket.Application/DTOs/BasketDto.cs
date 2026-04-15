@@ -20,3 +20,18 @@ public record CreateShoppingCartItemDto
     public decimal Price { get; set; }
     public int Quantity { get; set; }
 }
+
+public record BasketCheckoutDto(
+    string UserName,
+    decimal TotalPrice,
+    string Name,
+    string EmailAddress,
+    string AddressLine,
+    string Country,
+    string State,
+    string ZipCode,
+    string CardName,
+    string CardNumber,
+    string CardExpiration,
+    string Cvv,
+    int PaymentMethod);

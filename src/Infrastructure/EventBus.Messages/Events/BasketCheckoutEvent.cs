@@ -1,6 +1,6 @@
-﻿namespace Ordering.Core.Entities;
+﻿namespace EventBus.Messages.Events;
 
-public class Order : EntityBase
+public class BasketCheckoutEvent : BaseIntegrationEvent
 {
     public string? UserName { get; set; }
     public decimal? TotalPrice { get; set; }

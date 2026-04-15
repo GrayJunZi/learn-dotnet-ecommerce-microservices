@@ -1,4 +1,4 @@
-﻿using Basket.Application.Command;
+﻿using Basket.Application.Commands;
 using Basket.Application.GrpcServices;
 using Basket.Application.Mappers;
 using Basket.Application.Responses;

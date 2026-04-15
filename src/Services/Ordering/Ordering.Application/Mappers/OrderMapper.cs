@@ -1,4 +1,5 @@
-﻿using Ordering.Application.DTOs;
+﻿using EventBus.Messages.Events;
+using Ordering.Application.DTOs;
 using Ordering.Application.Orders.CreateOrder;
 using Ordering.Application.Orders.UpdateOrder;
 using Ordering.Core.Entities;
@@ -21,7 +22,7 @@ public static class OrderMapper
             order.CardName,
             order.CardNumber,
             order.CardExpiration,
-            order.CardCvv,
+            order.Cvv,
             order.PaymentMethod ?? 0);
 
     public static Order ToEntity(this CreateOrderCommand command)
@@ -38,7 +39,7 @@ public static class OrderMapper
             CardName = command.CardName,
             CardNumber = command.CardNumber,
             CardExpiration = command.CardExpiration,
-            CardCvv = command.CardCvv,
+            Cvv = command.Cvv,
             PaymentMethod = command.PaymentMethod
         };
 
@@ -55,7 +56,7 @@ public static class OrderMapper
         order.CardName = command.CardName;
         order.CardNumber = command.CardNumber;
         order.CardExpiration = command.CardExpiration;
-        order.CardCvv = command.CardCvv;
+        order.Cvv = command.Cvv;
         order.PaymentMethod = command.PaymentMethod;
     }
 
@@ -73,14 +74,14 @@ public static class OrderMapper
             CardName = createOrderDto.CardName,
             CardNumber = createOrderDto.CardNumber,
             CardExpiration = createOrderDto.CardExpiration,
-            CardCvv = createOrderDto.CardCvv,
+            Cvv = createOrderDto.Cvv,
             PaymentMethod = createOrderDto.PaymentMethod
         };
 
     public static UpdateOrderCommand ToCommand(this OrderDto orderDto)
         => new UpdateOrderCommand
         {
-            Id =  orderDto.Id,
+            Id = orderDto.Id,
             UserName = orderDto.UserName,
             TotalPrice = orderDto.TotalPrice,
             Name = orderDto.Name,
@@ -92,8 +93,25 @@ public static class OrderMapper
             CardName = orderDto.CardName,
             CardNumber = orderDto.CardNumber,
             CardExpiration = orderDto.CardExpiration,
-            CardCvv = orderDto.CardCvv,
+            Cvv = orderDto.Cvv,
             PaymentMethod = orderDto.PaymentMethod
         };
 
+    public static CreateOrderCommand ToCheckoutOrderCommand(this BasketCheckoutEvent basketCheckoutEvent)
+        => new CreateOrderCommand
+        {
+            UserName = basketCheckoutEvent.UserName,
+            TotalPrice = basketCheckoutEvent.TotalPrice,
+            Name = basketCheckoutEvent.Name,
+            EmailAddress = basketCheckoutEvent.EmailAddress,
+            AddressLine = basketCheckoutEvent.AddressLine,
+            Country = basketCheckoutEvent.Country,
+            State = basketCheckoutEvent.State,
+            ZipCode = basketCheckoutEvent.ZipCode,
+            CardName = basketCheckoutEvent.CardName,
+            CardNumber = basketCheckoutEvent.CardNumber,
+            CardExpiration = basketCheckoutEvent.CardExpiration,
+            Cvv = basketCheckoutEvent.Cvv,
+            PaymentMethod = basketCheckoutEvent.PaymentMethod
+        };
 }

@@ -4,7 +4,6 @@ using Discount.Application.Queries;
 using Discount.Grpc.Protos;
 using Grpc.Core;
 using MediatR;
-using Microsoft.AspNetCore.CookiePolicy;
 
 namespace Discount.API.Services;
 

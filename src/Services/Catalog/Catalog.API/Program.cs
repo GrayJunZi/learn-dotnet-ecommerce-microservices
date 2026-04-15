@@ -48,7 +48,7 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var options = scope.ServiceProvider.GetRequiredService<IOptions<DatabaseSettings>>();
-    await DatabaseSeeder.SeedAsync(options);
+    DatabaseSeeder.SeedAsync(options).Wait();
 }
 
 // Configure the HTTP request pipeline.

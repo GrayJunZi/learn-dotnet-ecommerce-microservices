@@ -1515,7 +1515,7 @@ public class Order : EntityBase
     public string? CardName { get; set; }
     public string? CardNumber { get; set; }
     public string? CardExpiration { get; set; }
-    public string? CardCvv { get; set; }
+    public string? Cvv { get; set; }
     public int? PaymentMethod { get; set; }
 }
 ```
@@ -1681,7 +1681,7 @@ public record OrderingDto
     public string? CardName { get; init; }
     public string? CardNumber { get; init; }
     public string? CardExpiration { get; init; }
-    public string? CardCvv { get; init; }
+    public string? Cvv { get; init; }
     public int? PaymentMethod { get; init; }
     public DateTime CreatedDate { get; init; }
 }
@@ -1737,7 +1737,7 @@ public record CreateOrderCommand : ICommand
     public string? CardName { get; init; }
     public string? CardNumber { get; init; }
     public string? CardExpiration { get; init; }
-    public string? CardCvv { get; init; }
+    public string? Cvv { get; init; }
     public int? PaymentMethod { get; init; }
 }
 ```
@@ -1770,7 +1770,7 @@ public class CreateOrderHandler : ICommandHandler<CreateOrderCommand>
             CardName = request.CardName,
             CardNumber = request.CardNumber,
             CardExpiration = request.CardExpiration,
-            CardCvv = request.CardCvv,
+            Cvv = request.Cvv,
             PaymentMethod = request.PaymentMethod
         };
 
@@ -1990,7 +1990,7 @@ public class OrderContextSeed
                 CardName = "张三",
                 CardNumber = "1234567890123456",
                 CardExpiration = "12/25",
-                CardCvv = "123",
+                Cvv = "123",
                 PaymentMethod = 1
             }
         };
@@ -2090,4 +2090,475 @@ FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
 ENTRYPOINT ["dotnet", "Ordering.API.dll"]
+```
+
+## 七、在 Basket 微服务和 Ordering 微服务之间建立异步通信
+
+为了实现 Basket 微服务和 Ordering 微服务之间的松耦合通信，我们采用事件驱动架构，通过 RabbitMQ 和 MassTransit 实现异步消息传递。
+
+### 1. 创建基础设施 EventBus.Messages 项目
+
+首先创建一个共享的消息契约项目，用于定义微服务之间通信的消息格式。
+
+#### 1.1 项目结构
+
+```
+src/BuildingBlocks/
+└── EventBus.Messages/
+    ├── Common/                    # 通用消息基类
+    ├── Events/                    # 事件定义
+    └── Messages.csproj           # 项目文件
+```
+
+#### 1.2 EventBus.Messages.csproj
+
+```xml
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MassTransit" Version="8.3.0" />
+  </ItemGroup>
+
+</Project>
+```
+
+### 2. 创建基础集成事件
+
+在 EventBus.Messages 项目中定义通用的集成事件基类和具体的事件类型。
+
+#### 2.1 集成事件基类
+
+```csharp
+// Common/IntegrationBaseEvent.cs
+using MassTransit;
+
+namespace EventBus.Messages.Common;
+
+public abstract class IntegrationBaseEvent : CorrelatedBy<Guid>
+{
+    public IntegrationBaseEvent()
+    {
+        Id = Guid.NewGuid();
+        CreationDate = DateTime.UtcNow;
+    }
+
+    public IntegrationBaseEvent(Guid id, DateTime createDate)
+    {
+        Id = id;
+        CreationDate = createDate;
+    }
+
+    public Guid Id { get; private set; }
+    public DateTime CreationDate { get; private set; }
+    public Guid CorrelationId { get; set; }
+}
+```
+
+#### 2.2 BasketCheckout 事件
+
+```csharp
+// Events/BasketCheckoutEvent.cs
+using EventBus.Messages.Common;
+
+namespace EventBus.Messages.Events;
+
+public class BasketCheckoutEvent : IntegrationBaseEvent
+{
+    public string UserName { get; set; }
+    public decimal TotalPrice { get; set; }
+    
+    // 账单地址
+    public string FirstName { get; set; }
+    public string LastName { get; set; }
+    public string EmailAddress { get; set; }
+    public string AddressLine { get; set; }
+    public string Country { get; set; }
+    public string State { get; set; }
+    public string ZipCode { get; set; }
+    
+    // 支付信息
+    public string CardName { get; set; }
+    public string CardNumber { get; set; }
+    public string Expiration { get; set; }
+    public string CVV { get; set; }
+    public int PaymentMethod { get; set; }
+}
+```
+
+### 3. 安装 MassTransit 组件
+
+在 Basket.API 和 Ordering.API 项目中安装 MassTransit 相关组件。
+
+#### 3.1 Basket.API 项目依赖
+
+```xml
+<!-- Basket.API.csproj -->
+<ItemGroup>
+  <PackageReference Include="MassTransit" Version="8.3.0" />
+  <PackageReference Include="MassTransit.RabbitMQ" Version="8.3.0" />
+  <PackageReference Include="MassTransit.Extensions.DependencyInjection" Version="8.3.0" />
+</ItemGroup>
+
+<ItemGroup>
+  <ProjectReference Include="..\..\BuildingBlocks\EventBus.Messages\EventBus.Messages.csproj" />
+</ItemGroup>
+```
+
+#### 3.2 Ordering.API 项目依赖
+
+```xml
+<!-- Ordering.API.csproj -->
+<ItemGroup>
+  <PackageReference Include="MassTransit" Version="8.3.0" />
+  <PackageReference Include="MassTransit.RabbitMQ" Version="8.3.0" />
+  <PackageReference Include="MassTransit.Extensions.DependencyInjection" Version="8.3.0" />
+</ItemGroup>
+
+<ItemGroup>
+  <ProjectReference Include="..\..\BuildingBlocks\EventBus.Messages\EventBus.Messages.csproj" />
+</ItemGroup>
+```
+
+### 4. 创建 BasketCheckout 命令与处理器
+
+在 Basket.API 项目中创建处理结账流程的命令和处理器。
+
+#### 4.1 BasketCheckout 命令
+
+```csharp
+// Application/Features/BasketCheckout/Commands/CheckoutBasketCommand.cs
+using MediatR;
+
+namespace Basket.API.Application.Features.BasketCheckout.Commands;
+
+public class CheckoutBasketCommand : IRequest<int>
+{
+    public string UserName { get; set; }
+    public decimal TotalPrice { get; set; }
+    
+    // 账单地址
+    public string FirstName { get; set; }
+    public string LastName { get; set; }
+    public string EmailAddress { get; set; }
+    public string AddressLine { get; set; }
+    public string Country { get; set; }
+    public string State { get; set; }
+    public string ZipCode { get; set; }
+    
+    // 支付信息
+    public string CardName { get; set; }
+    public string CardNumber { get; set; }
+    public string Expiration { get; set; }
+    public string CVV { get; set; }
+    public int PaymentMethod { get; set; }
+}
+```
+
+#### 4.2 BasketCheckout 命令处理器
+
+```csharp
+// Application/Features/BasketCheckout/Commands/CheckoutBasketCommandHandler.cs
+using Basket.API.Application.Contracts.Infrastructure;
+using Basket.API.Application.Contracts.Persistence;
+using Basket.API.Application.Models;
+using EventBus.Messages.Events;
+using MassTransit;
+using MediatR;
+
+namespace Basket.API.Application.Features.BasketCheckout.Commands;
+
+public class CheckoutBasketCommandHandler : IRequestHandler<CheckoutBasketCommand, int>
+{
+    private readonly IBasketRepository _basketRepository;
+    private readonly IPublishEndpoint _publishEndpoint;
+    private readonly IMapper _mapper;
+
+    public CheckoutBasketCommandHandler(
+        IBasketRepository basketRepository,
+        IPublishEndpoint publishEndpoint,
+        IMapper mapper)
+    {
+        _basketRepository = basketRepository;
+        _publishEndpoint = publishEndpoint;
+        _mapper = mapper;
+    }
+
+    public async Task<int> Handle(CheckoutBasketCommand request, CancellationToken cancellationToken)
+    {
+        // 1. 获取购物车
+        var basket = await _basketRepository.GetBasketAsync(request.UserName);
+        if (basket == null)
+        {
+            throw new Exception("购物车不存在");
+        }
+
+        // 2. 创建结账事件
+        var eventMessage = _mapper.Map<BasketCheckoutEvent>(request);
+        eventMessage.TotalPrice = basket.TotalPrice;
+
+        // 3. 发送事件到消息队列
+        await _publishEndpoint.Publish(eventMessage, cancellationToken);
+
+        // 4. 清空购物车
+        await _basketRepository.DeleteBasketAsync(request.UserName);
+
+        return 1;
+    }
+}
+```
+
+### 5. 创建 BasketCheckout 控制器方法
+
+在 Basket.API 控制器中添加处理结账的 API 端点。
+
+#### 5.1 BasketCheckout 控制器
+
+```csharp
+// Controllers/BasketCheckoutController.cs
+using Basket.API.Application.Features.BasketCheckout.Commands;
+using MediatR;
+using Microsoft.AspNetCore.Mvc;
+
+namespace Basket.API.Controllers;
+
+[ApiController]
+[Route("api/v1/[controller]")]
+public class BasketCheckoutController : ControllerBase
+{
+    private readonly IMediator _mediator;
+
+    public BasketCheckoutController(IMediator mediator)
+    {
+        _mediator = mediator;
+    }
+
+    [HttpPost(Name = "CheckoutBasket")]
+    [ProducesResponseType((int)HttpStatusCode.Accepted)]
+    [ProducesResponseType((int)HttpStatusCode.BadRequest)]
+    public async Task<ActionResult<int>> CheckoutBasket([FromBody] CheckoutBasketCommand command)
+    {
+        var result = await _mediator.Send(command);
+        return Ok(result);
+    }
+}
+```
+
+### 6. 创建 BasketOrdering Consumer
+
+在 Ordering.API 项目中创建消费者来处理来自 Basket 微服务的结账事件。
+
+#### 6.1 BasketCheckout Consumer
+
+```csharp
+// Application/Features/Orders/EventHandlers/BasketCheckoutConsumer.cs
+using EventBus.Messages.Events;
+using MassTransit;
+using Ordering.API.Application.Contracts.Infrastructure;
+using Ordering.API.Application.Contracts.Persistence;
+using Ordering.API.Application.Models;
+
+namespace Ordering.API.Application.Features.Orders.EventHandlers;
+
+public class BasketCheckoutConsumer : IConsumer<BasketCheckoutEvent>
+{
+    private readonly IOrderRepository _orderRepository;
+    private readonly IMapper _mapper;
+    private readonly IEmailService _emailService;
+    private readonly ILogger<BasketCheckoutConsumer> _logger;
+
+    public BasketCheckoutConsumer(
+        IOrderRepository orderRepository,
+        IMapper mapper,
+        IEmailService emailService,
+        ILogger<BasketCheckoutConsumer> logger)
+    {
+        _orderRepository = orderRepository;
+        _mapper = mapper;
+        _emailService = emailService;
+        _logger = logger;
+    }
+
+    public async Task Consume(ConsumeContext<BasketCheckoutEvent> context)
+    {
+        try
+        {
+            var message = context.Message;
+            
+            // 1. 创建订单
+            var order = _mapper.Map<Order>(message);
+            await _orderRepository.AddAsync(order);
+
+            // 2. 发送确认邮件
+            var email = new Email
+            {
+                To = message.EmailAddress,
+                Subject = "订单确认",
+                Body = $"尊敬的 {message.FirstName} {message.LastName}，您的订单已成功创建。订单总金额：{message.TotalPrice}"
+            };
+
+            await _emailService.SendEmail(email);
+
+            _logger.LogInformation($"BasketCheckoutEvent 消费成功。订单ID：{order.Id}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"处理 BasketCheckoutEvent 时发生错误: {ex.Message}");
+            throw;
+        }
+    }
+}
+```
+
+#### 6.2 配置 MassTransit 消费者
+
+在 Ordering.API 的 Program.cs 中配置 MassTransit：
+
+```csharp
+// Program.cs
+using MassTransit;
+using Ordering.API.Application.Features.Orders.EventHandlers;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// 配置 MassTransit
+builder.Services.AddMassTransit(config =>
+{
+    config.AddConsumer<BasketCheckoutConsumer>();
+
+    config.UsingRabbitMq((ctx, cfg) =>
+    {
+        cfg.Host(builder.Configuration["EventBusSettings:HostAddress"]);
+        
+        cfg.ReceiveEndpoint(EventBusConstants.BasketCheckoutQueue, c =>
+        {
+            c.ConfigureConsumer<BasketCheckoutConsumer>(ctx);
+        });
+    });
+});
+
+// 其他配置...
+```
+
+#### 6.3 事件总线常量
+
+```csharp
+// Common/EventBusConstants.cs
+namespace Ordering.API.Application.Common;
+
+public static class EventBusConstants
+{
+    public const string BasketCheckoutQueue = "basketcheckout-queue";
+}
+```
+
+### 7. 配置 RabbitMQ 连接
+
+在 appsettings.json 中添加 RabbitMQ 配置：
+
+```json
+{
+  "EventBusSettings": {
+    "HostAddress": "rabbitmq://localhost:5672"
+  }
+}
+```
+
+### 8. Docker 配置
+
+为了支持容器化部署，我们需要为 Basket.API 和 Ordering.API 配置 Dockerfile，并更新 docker-compose.yml 文件以包含所有必要的服务。
+
+#### 8.1 Basket.API Dockerfile
+
+**Dockerfile** (`src/Services/Basket/Basket.API/Dockerfile`)：
+
+```dockerfile
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS base
+WORKDIR /app
+EXPOSE 8080
+
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /src
+COPY ["src/Services/Basket/Basket.API/Basket.API.csproj", "src/Services/Basket/Basket.API/"]
+COPY ["src/Services/Basket/Basket.Application/Basket.Application.csproj", "src/Services/Basket/Basket.Application/"]
+COPY ["src/Services/Basket/Basket.Core/Basket.Core.csproj", "src/Services/Basket/Basket.Core/"]
+COPY ["src/Services/Basket/Basket.Infrastructure/Basket.Infrastructure.csproj", "src/Services/Basket/Basket.Infrastructure/"]
+COPY ["src/BuildingBlocks/EventBus.Messages/EventBus.Messages.csproj", "src/BuildingBlocks/EventBus.Messages/"]
+RUN dotnet restore "src/Services/Basket/Basket.API/Basket.API.csproj"
+
+COPY . .
+WORKDIR "/src/src/Services/Basket/Basket.API"
+RUN dotnet build "Basket.API.csproj" -c Release -o /app/build
+
+FROM build AS publish
+RUN dotnet publish "Basket.API.csproj" -c Release -o /app/publish
+
+FROM base AS final
+WORKDIR /app
+COPY --from=publish /app/publish .
+ENTRYPOINT ["dotnet", "Basket.API.dll"]
+```
+
+#### 8.2 Ordering.API Dockerfile
+
+**Dockerfile** (`src/Services/Ordering/Ordering.API/Dockerfile`)：
+
+```dockerfile
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS base
+WORKDIR /app
+EXPOSE 8080
+
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /src
+COPY ["src/Services/Ordering/Ordering.API/Ordering.API.csproj", "src/Services/Ordering/Ordering.API/"]
+COPY ["src/Services/Ordering/Ordering.Application/Ordering.Application.csproj", "src/Services/Ordering/Ordering.Application/"]
+COPY ["src/Services/Ordering/Ordering.Core/Ordering.Core.csproj", "src/Services/Ordering/Ordering.Core/"]
+COPY ["src/Services/Ordering/Ordering.Infrastructure/Ordering.Infrastructure.csproj", "src/Services/Ordering/Ordering.Infrastructure/"]
+COPY ["src/BuildingBlocks/EventBus.Messages/EventBus.Messages.csproj", "src/BuildingBlocks/EventBus.Messages/"]
+RUN dotnet restore "src/Services/Ordering/Ordering.API/Ordering.API.csproj"
+
+COPY . .
+WORKDIR "/src/src/Services/Ordering/Ordering.API"
+RUN dotnet build "Ordering.API.csproj" -c Release -o /app/build
+
+FROM build AS publish
+RUN dotnet publish "Ordering.API.csproj" -c Release -o /app/publish
+
+FROM base AS final
+WORKDIR /app
+COPY --from=publish /app/publish .
+ENTRYPOINT ["dotnet", "Ordering.API.dll"]
+```
+
+#### 8.3 更新 docker-compose.yml
+
+**docker-compose.yml**（项目根目录）：
+
+```yaml
+version: '3.8'
+
+services:
+  # RabbitMQ 消息队列
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+```
+
+#### 8.4 启动所有服务
+
+使用以下命令启动所有微服务和基础设施：
+
+```bash
+docker-compose up -d
 ```

@@ -33,7 +33,7 @@ namespace Ordering.Infrastructure.Migrations
                     b.Property<string>("AddressLine")
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<string>("CardCvv")
+                    b.Property<string>("Cvv")
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("CardExpiration")

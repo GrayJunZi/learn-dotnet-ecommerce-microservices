@@ -1,4 +1,4 @@
-﻿using Basket.Application.Command;
+﻿using Basket.Application.Commands;
 using Basket.Core.Repositories;
 using MediatR;
 

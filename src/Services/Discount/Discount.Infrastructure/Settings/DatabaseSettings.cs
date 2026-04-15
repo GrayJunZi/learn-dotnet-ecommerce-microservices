@@ -1,6 +1,4 @@
-﻿using System.Reflection;
-
-namespace Discount.Infrastructure.Settings;
+﻿namespace Discount.Infrastructure.Settings;
 
 public class DatabaseSettings
 {

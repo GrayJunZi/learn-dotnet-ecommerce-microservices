@@ -1,5 +1,4 @@
-﻿using System.Net;
-using Google.Protobuf;
+﻿using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Google.Rpc;
 using Grpc.Core;

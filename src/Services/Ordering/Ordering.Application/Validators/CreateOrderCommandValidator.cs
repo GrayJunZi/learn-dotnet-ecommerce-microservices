@@ -33,9 +33,9 @@ public class CreateOrderCommandValidator : AbstractValidator<CreateOrderCommand>
             .When(x => !string.IsNullOrEmpty(x.CardExpiration))
             .WithMessage("{PropertyName} must be in MM/YY format.");
 
-        RuleFor(x => x.CardCvv)
+        RuleFor(x => x.Cvv)
             .Matches(@"^\d{3,4}$")
-            .When(x => !string.IsNullOrEmpty(x.CardCvv))
+            .When(x => !string.IsNullOrEmpty(x.Cvv))
             .WithMessage("{PropertyName} must be 3 or  4 digits.");
     }
 
@@ -74,9 +74,9 @@ public class CreateOrderCommandValidator : AbstractValidator<CreateOrderCommand>
                 .When(x => !string.IsNullOrEmpty(x.CardExpiration))
                 .WithMessage("{PropertyName} must be in MM/YY format.");
 
-            RuleFor(x => x.CardCvv)
+            RuleFor(x => x.Cvv)
                 .Matches(@"^\d{3,4}$")
-                .When(x => !string.IsNullOrEmpty(x.CardCvv))
+                .When(x => !string.IsNullOrEmpty(x.Cvv))
                 .WithMessage("{PropertyName} must be 3 or  4 digits.");
         }
     }

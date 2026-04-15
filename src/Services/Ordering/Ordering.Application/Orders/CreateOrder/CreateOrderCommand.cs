@@ -15,6 +15,6 @@ public class CreateOrderCommand : ICommand<int>
     public string? CardName { get; init; }
     public string? CardNumber { get; init; }
     public string? CardExpiration { get; init; }
-    public string? CardCvv { get; init; }
+    public string? Cvv { get; init; }
     public int? PaymentMethod { get; init; }
 }

@@ -12,7 +12,7 @@ public record CreateOrderDto(
     string CardName,
     string CardNumber,
     string CardExpiration,
-    string CardCvv,
+    string Cvv,
     int PaymentMethod);
 
 public record OrderDto(
@@ -28,5 +28,5 @@ public record OrderDto(
     string CardName,
     string CardNumber,
     string CardExpiration,
-    string CardCvv,
+    string Cvv,
     int PaymentMethod);

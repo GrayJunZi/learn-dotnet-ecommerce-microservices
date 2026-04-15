@@ -35,6 +35,9 @@
       context: .
       dockerfile: src/Services/Ordering/Ordering.API/Dockerfile
 
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+
 volumes:
   mongo_data:
   postgres_data:

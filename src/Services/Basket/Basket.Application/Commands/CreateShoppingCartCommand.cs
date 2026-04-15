@@ -2,7 +2,7 @@
 using Basket.Application.Responses;
 using MediatR;
 
-namespace Basket.Application.Command;
+namespace Basket.Application.Commands;
 
 public record CreateShoppingCartCommand(
     string UserName,
