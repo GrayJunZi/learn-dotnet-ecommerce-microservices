@@ -1,4 +1,6 @@
-﻿using EventBus.Messages.Events;
+﻿using System.Text.Json;
+using EventBus.Messages.Events;
+using Ordering.Application.Constants;
 using Ordering.Application.DTOs;
 using Ordering.Application.Orders.CreateOrder;
 using Ordering.Application.Orders.UpdateOrder;
@@ -113,5 +115,31 @@ public static class OrderMapper
             CardExpiration = basketCheckoutEvent.CardExpiration,
             Cvv = basketCheckoutEvent.Cvv,
             PaymentMethod = basketCheckoutEvent.PaymentMethod
+        };
+
+    public static OutboxMessage ToOutboxMessage(Order order, Guid correlationId)
+        => new OutboxMessage
+        {
+            CorrelationId = correlationId.ToString(),
+            Type = OutboxMessageTypes.OrderCreated,
+            OccurredOn = DateTime.UtcNow,
+            Content = JsonSerializer.Serialize(new
+            {
+                order.Id,
+                order.UserName,
+                order.TotalPrice,
+                order.Name,
+                order.EmailAddress,
+                order.AddressLine,
+                order.Country,
+                order.State,
+                order.ZipCode,
+                order.CardName,
+                order.CardNumber,
+                order.CardExpiration,
+                order.Cvv,
+                order.PaymentMethod,
+                order.Status,
+            }),
         };
 }

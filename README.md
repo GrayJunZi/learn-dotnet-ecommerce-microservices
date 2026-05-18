@@ -2562,3 +2562,548 @@ services:
 ```bash
 docker-compose up -d
 ```
+
+## 八、实现 SAGA 模式
+
+### 8.1 介绍
+
+在分布式系统中，传统的两阶段提交（2PC）事务难以实现，因为涉及多个独立的微服务和数据库。SAGA 模式提供了一种替代方案，通过将长事务拆分为多个本地事务来实现最终一致性。
+
+本章节将实现基于 Outbox 模式的 SAGA 解决方案，确保消息传递的可靠性和事务一致性。
+
+### 8.2 SAGA 模式概述
+
+**SAGA 模式的核心概念：**
+
+| 特性 | 说明 |
+|------|------|
+| **本地事务** | 每个服务只负责自己的本地事务 |
+| **事件驱动** | 通过事件触发后续步骤 |
+| **补偿机制** | 失败时执行补偿操作回滚 |
+| **最终一致性** | 保证数据最终达到一致状态 |
+
+**SAGA 协调方式：**
+- **编排式（Choreography）**：每个服务知道自己需要触发哪些后续服务
+- **编排式（Orchestration）**：由专门的协调器控制整个流程
+
+本项目采用**编排式 + Outbox 模式**的组合方案。
+
+### 8.3 创建 Outbox Message 实体
+
+Outbox 模式确保消息与数据库事务的原子性，避免消息丢失或重复发送。
+
+```csharp
+// Ordering.Core/Entities/OutboxMessage.cs
+using System.Text.Json;
+
+namespace Ordering.Core.Entities;
+
+public class OutboxMessage : EntityBase
+{
+    public string Type { get; set; } = string.Empty;
+    public string Content { get; set; } = string.Empty;
+    public DateTime? ProcessedDate { get; set; }
+    public string? ErrorMessage { get; set; }
+    public int RetryCount { get; set; }
+
+    public static OutboxMessage Create<T>(T message)
+    {
+        return new OutboxMessage
+        {
+            Type = typeof(T).AssemblyQualifiedName ?? string.Empty,
+            Content = JsonSerializer.Serialize(message),
+            RetryCount = 0
+        };
+    }
+
+    public object? Deserialize()
+    {
+        var type = Type.GetType(Type);
+        if (type == null) return null;
+        
+        return JsonSerializer.Deserialize(Content, type);
+    }
+}
+```
+
+### 8.4 创建 Order Status 订单状态
+
+为订单实体添加状态字段，用于跟踪 SAGA 流程的执行状态。
+
+```csharp
+// Ordering.Core/Enums/OrderStatus.cs
+namespace Ordering.Core.Enums;
+
+public enum OrderStatus
+{
+    Pending = 1,
+    Created = 2,
+    PaymentCompleted = 3,
+    ShippingCompleted = 4,
+    Completed = 5,
+    Failed = 6,
+    Cancelled = 7
+}
+```
+
+更新 Order 实体添加状态字段：
+
+```csharp
+// Ordering.Core/Entities/Order.cs
+public class Order : EntityBase
+{
+    public string? UserName { get; set; }
+    public decimal? TotalPrice { get; set; }
+    public string? Name { get; set; }
+    public string? EmailAddress { get; set; }
+    public string? AddressLine { get; set; }
+    public string? Country { get; set; }
+    public string? State { get; set; }
+    public string? ZipCode { get; set; }
+    public string? CardName { get; set; }
+    public string? CardNumber { get; set; }
+    public string? CardExpiration { get; set; }
+    public string? Cvv { get; set; }
+    public int? PaymentMethod { get; set; }
+    
+    // SAGA 相关字段
+    public OrderStatus Status { get; set; } = OrderStatus.Pending;
+    public string? PaymentTransactionId { get; set; }
+}
+```
+
+### 8.5 扩展 Order Context
+
+在 OrderContext 中添加 OutboxMessage DbSet 并配置实体映射。
+
+```csharp
+// Ordering.Infrastructure/Data/OrderContext.cs
+public class OrderContext : DbContext
+{
+    public OrderContext(DbContextOptions<OrderContext> options) : base(options) { }
+
+    public DbSet<Order> Orders { get; set; }
+    public DbSet<OutboxMessage> OutboxMessages { get; set; }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Order>().HasKey(o => o.Id);
+        
+        modelBuilder.Entity<Order>().Property(o => o.TotalPrice)
+            .HasColumnType("decimal(18,2)");
+
+        modelBuilder.Entity<Order>().Property(o => o.Status)
+            .HasConversion<string>();
+
+        // OutboxMessage 配置
+        modelBuilder.Entity<OutboxMessage>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Type).IsRequired().HasMaxLength(500);
+            entity.Property(e => e.Content).IsRequired().HasColumnType("TEXT");
+            entity.HasIndex(e => e.ProcessedDate);
+        });
+
+        base.OnModelCreating(modelBuilder);
+    }
+}
+```
+
+### 8.6 扩展 Order Repository
+
+添加 OutboxMessage 相关的仓储方法。
+
+```csharp
+// Ordering.Core/Repositories/IOutboxRepository.cs
+namespace Ordering.Core.Repositories;
+
+public interface IOutboxRepository
+{
+    Task AddAsync(OutboxMessage message);
+    Task<IReadOnlyList<OutboxMessage>> GetUnprocessedMessagesAsync(int batchSize = 100);
+    Task MarkAsProcessedAsync(int messageId);
+    Task UpdateRetryCountAndErrorAsync(int messageId, string errorMessage);
+}
+```
+
+```csharp
+// Ordering.Infrastructure/Repositories/OutboxRepository.cs
+namespace Ordering.Infrastructure.Repositories;
+
+public class OutboxRepository : IOutboxRepository
+{
+    private readonly OrderContext _dbContext;
+
+    public OutboxRepository(OrderContext dbContext)
+    {
+        _dbContext = dbContext;
+    }
+
+    public async Task AddAsync(OutboxMessage message)
+    {
+        await _dbContext.OutboxMessages.AddAsync(message);
+    }
+
+    public async Task<IReadOnlyList<OutboxMessage>> GetUnprocessedMessagesAsync(int batchSize = 100)
+    {
+        return await _dbContext.OutboxMessages
+            .Where(m => m.ProcessedDate == null)
+            .OrderBy(m => m.CreatedDate)
+            .Take(batchSize)
+            .ToListAsync();
+    }
+
+    public async Task MarkAsProcessedAsync(int messageId)
+    {
+        var message = await _dbContext.OutboxMessages.FindAsync(messageId);
+        if (message != null)
+        {
+            message.ProcessedDate = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync();
+        }
+    }
+
+    public async Task UpdateRetryCountAndErrorAsync(int messageId, string errorMessage)
+    {
+        var message = await _dbContext.OutboxMessages.FindAsync(messageId);
+        if (message != null)
+        {
+            message.RetryCount++;
+            message.ErrorMessage = errorMessage;
+            await _dbContext.SaveChangesAsync();
+        }
+    }
+}
+```
+
+### 8.7 扩展 Order Creation Handler
+
+修改 CreateOrderHandler，集成 Outbox 模式，将消息写入 Outbox 表而不是直接发布。
+
+```csharp
+// Ordering.Application/Orders/CreateOrder/CreateOrderHandler.cs
+using EventBus.Messages.Events;
+
+public class CreateOrderHandler : ICommandHandler<CreateOrderCommand>
+{
+    private readonly IOrderRepository _orderRepository;
+    private readonly IOutboxRepository _outboxRepository;
+
+    public CreateOrderHandler(
+        IOrderRepository orderRepository,
+        IOutboxRepository outboxRepository)
+    {
+        _orderRepository = orderRepository;
+        _outboxRepository = outboxRepository;
+    }
+
+    public async Task<Result<int>> Handle(CreateOrderCommand request, CancellationToken cancellationToken)
+    {
+        // 1. 创建订单实体
+        var order = new Order
+        {
+            UserName = request.UserName,
+            TotalPrice = request.TotalPrice,
+            Name = request.Name,
+            EmailAddress = request.EmailAddress,
+            AddressLine = request.AddressLine,
+            Country = request.Country,
+            State = request.State,
+            ZipCode = request.ZipCode,
+            CardName = request.CardName,
+            CardNumber = request.CardNumber,
+            CardExpiration = request.CardExpiration,
+            Cvv = request.Cvv,
+            PaymentMethod = request.PaymentMethod,
+            Status = OrderStatus.Created
+        };
+
+        // 2. 创建 Outbox 消息
+        var orderCreatedEvent = new OrderCreatedEvent
+        {
+            OrderId = order.Id,
+            UserName = order.UserName,
+            TotalPrice = order.TotalPrice ?? 0,
+            EmailAddress = order.EmailAddress ?? string.Empty
+        };
+
+        var outboxMessage = OutboxMessage.Create(orderCreatedEvent);
+
+        // 3. 在同一事务中保存订单和消息
+        await _orderRepository.AddAsync(order);
+        await _outboxRepository.AddAsync(outboxMessage);
+        
+        // 使用 OrderContext 的 SaveChangesAsync 确保原子性
+        await _orderRepository.UnitOfWork.SaveChangesAsync(cancellationToken);
+
+        return Result<int>.Success(order.Id);
+    }
+}
+```
+
+创建 OrderCreatedEvent 事件：
+
+```csharp
+// EventBus.Messages/Events/OrderCreatedEvent.cs
+using EventBus.Messages.Common;
+
+namespace EventBus.Messages.Events;
+
+public class OrderCreatedEvent : IntegrationBaseEvent
+{
+    public int OrderId { get; set; }
+    public string UserName { get; set; } = string.Empty;
+    public decimal TotalPrice { get; set; }
+    public string EmailAddress { get; set; } = string.Empty;
+}
+```
+
+### 8.8 创建 Outbox Message Dispatcher Service
+
+创建后台服务定期从 Outbox 表读取消息并发布到 RabbitMQ。
+
+```csharp
+// Ordering.API/Services/OutboxMessageDispatcher.cs
+using EventBus.Messages.Events;
+using MassTransit;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Ordering.Core.Repositories;
+
+namespace Ordering.API.Services;
+
+public class OutboxMessageDispatcher : BackgroundService
+{
+    private readonly IServiceProvider _serviceProvider;
+    private readonly ILogger<OutboxMessageDispatcher> _logger;
+    private readonly TimeSpan _pollingInterval = TimeSpan.FromSeconds(5);
+    private const int MaxRetryCount = 5;
+
+    public OutboxMessageDispatcher(
+        IServiceProvider serviceProvider,
+        ILogger<OutboxMessageDispatcher> logger)
+    {
+        _serviceProvider = serviceProvider;
+        _logger = logger;
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        _logger.LogInformation("Outbox Message Dispatcher started");
+
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                await ProcessOutboxMessagesAsync(stoppingToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error processing outbox messages");
+            }
+
+            await Task.Delay(_pollingInterval, stoppingToken);
+        }
+
+        _logger.LogInformation("Outbox Message Dispatcher stopping");
+    }
+
+    private async Task ProcessOutboxMessagesAsync(CancellationToken cancellationToken)
+    {
+        using var scope = _serviceProvider.CreateScope();
+        var outboxRepository = scope.ServiceProvider.GetRequiredService<IOutboxRepository>();
+        var publishEndpoint = scope.ServiceProvider.GetRequiredService<IPublishEndpoint>();
+
+        var messages = await outboxRepository.GetUnprocessedMessagesAsync(10);
+        
+        foreach (var message in messages)
+        {
+            try
+            {
+                if (message.RetryCount >= MaxRetryCount)
+                {
+                    _logger.LogWarning("Message {MessageId} has exceeded max retry count", message.Id);
+                    await outboxRepository.UpdateRetryCountAndErrorAsync(message.Id, "Max retry count exceeded");
+                    continue;
+                }
+
+                var eventMessage = message.Deserialize();
+                if (eventMessage != null)
+                {
+                    await publishEndpoint.Publish(eventMessage, cancellationToken);
+                    await outboxRepository.MarkAsProcessedAsync(message.Id);
+                    _logger.LogInformation("Outbox message {MessageId} processed successfully", message.Id);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error processing outbox message {MessageId}", message.Id);
+                await outboxRepository.UpdateRetryCountAndErrorAsync(message.Id, ex.Message);
+            }
+        }
+    }
+}
+```
+
+### 8.9 配置 Program.cs
+
+在 Program.cs 中注册 Outbox Dispatcher 服务和相关依赖。
+
+```csharp
+// Ordering.API/Program.cs
+using MassTransit;
+using Ordering.API.Services;
+using Ordering.Core.Repositories;
+using Ordering.Infrastructure.Repositories;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// 添加控制器
+builder.Services.AddControllers();
+builder.Services.AddOpenApi();
+
+// 注册 Ordering 服务
+builder.Services.AddOrderingServices(builder.Configuration);
+
+// 注册 Outbox Repository
+builder.Services.AddScoped<IOutboxRepository, OutboxRepository>();
+
+// 注册 Outbox Message Dispatcher
+builder.Services.AddHostedService<OutboxMessageDispatcher>();
+
+// 配置 MassTransit
+builder.Services.AddMassTransit(config =>
+{
+    config.UsingRabbitMq((ctx, cfg) =>
+    {
+        cfg.Host(builder.Configuration["EventBusSettings:HostAddress"]);
+        cfg.ConfigureEndpoints(ctx);
+    });
+});
+
+var app = builder.Build();
+
+// 数据库迁移
+app.MigrateDatabase<OrderContext>((context, services) =>
+{
+    var logger = services.GetRequiredService<ILogger<OrderContextSeed>>();
+    OrderContextSeed.SeedAsync(context, logger).Wait();
+});
+
+if (app.Environment.IsDevelopment())
+{
+    app.MapOpenApi();
+}
+
+app.UseHttpsRedirection();
+app.MapControllers();
+app.Run();
+```
+
+### 8.10 EF Migration 和 Docker Build
+
+**创建 OutboxMessage 表迁移：**
+
+```bash
+# 创建迁移
+dotnet ef migrations add OutboxMessageTable --project src/Services/Ordering/Ordering.Infrastructure --startup-project src/Services/Ordering/Ordering.API
+
+# 应用迁移
+dotnet ef database update --project src/Services/Ordering/Ordering.Infrastructure --startup-project src/Services/Ordering/Ordering.API
+```
+
+**Docker Compose 配置：**
+
+```yaml
+# docker-compose.yml
+services:
+  ordering.db:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      - SA_PASSWORD=YourStrong!Passw0rd
+      - ACCEPT_EULA=Y
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver_data:/var/opt/mssql
+
+  ordering.api:
+    image: ordering.api
+    build:
+      context: .
+      dockerfile: src/Services/Ordering/Ordering.API/Dockerfile
+    environment:
+      - DatabaseSettings__ConnectionString=Server=ordering.db;Database=OrderDb;User Id=sa;Password=YourStrong!Passw0rd;TrustServerCertificate=true;
+      - EventBusSettings__HostAddress=rabbitmq://rabbitmq:5672
+    depends_on:
+      - ordering.db
+      - rabbitmq
+    ports:
+      - "8003:8080"
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+volumes:
+  sqlserver_data:
+```
+
+**启动服务：**
+
+```bash
+docker-compose up -d
+```
+
+### 8.11 Outbox Table Demo
+
+**OutboxMessages 表结构：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| Id | int | 主键 |
+| Type | varchar(500) | 事件类型全称 |
+| Content | text | 序列化后的事件内容 |
+| ProcessedDate | datetime | 处理完成时间 |
+| ErrorMessage | nvarchar(max) | 错误信息 |
+| RetryCount | int | 重试次数 |
+| CreatedDate | datetime | 创建时间 |
+| LastModifiedDate | datetime | 最后修改时间 |
+
+**典型数据示例：**
+
+```sql
+SELECT * FROM OutboxMessages;
+
+-- 结果示例
+-- Id | Type                                      | Content                                                                 | ProcessedDate       | ErrorMessage | RetryCount | CreatedDate
+-- 1  | EventBus.Messages.Events.OrderCreatedEvent | {"OrderId":1,"UserName":"testuser","TotalPrice":99.99,"EmailAddress":"test@example.com"} | 2024-01-15 10:30:00 | NULL        | 0          | 2024-01-15 10:29:55
+```
+
+**工作流程：**
+
+```
+1. 用户创建订单
+       ↓
+2. CreateOrderHandler 创建 Order 和 OutboxMessage
+       ↓
+3. 同一事务保存到数据库
+       ↓
+4. OutboxMessageDispatcher 轮询未处理消息
+       ↓
+5. 反序列化消息并发布到 RabbitMQ
+       ↓
+6. 标记消息为已处理
+       ↓
+7. 下游服务消费消息
+```
+
+**优势：**
+
+- **原子性**：订单创建和消息写入在同一事务中
+- **可靠性**：即使服务崩溃，消息也不会丢失
+- **最终一致性**：通过重试机制确保消息最终被处理
+- **可追溯性**：Outbox 表提供完整的消息历史记录

@@ -17,4 +17,6 @@ public class CreateOrderCommand : ICommand<int>
     public string? CardExpiration { get; init; }
     public string? Cvv { get; init; }
     public int? PaymentMethod { get; init; }
+
+    public Guid CorrelationId { get; init; }
 }

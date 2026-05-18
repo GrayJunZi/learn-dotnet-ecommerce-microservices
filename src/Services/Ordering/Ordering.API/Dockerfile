@@ -14,7 +14,7 @@ COPY ["src/Services/Ordering/Ordering.Application/Ordering.Application.csproj", 
 COPY ["src/Infrastructure/EventBus.Messages/EventBus.Messages.csproj", "src/Infrastructure/EventBus.Messages/"]
 RUN dotnet restore "src/Services/Ordering/Ordering.API/Ordering.API.csproj"
 COPY . .
-WORKDIR "/src/src/Services/Ordering/Ordering.API"
+WORKDIR "/src/src/Services/Ordering/Ordering.API
 RUN dotnet build "./Ordering.API.csproj" -c $BUILD_CONFIGURATION -o /app/build
 
 FROM build AS publish

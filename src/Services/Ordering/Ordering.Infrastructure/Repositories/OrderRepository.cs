@@ -10,4 +10,10 @@ public class OrderRepository(OrderContext orderContext) : RepositoryBase<Order>(
     {
         return await GetAllAsync(x => x.UserName == userName);
     }
+
+    public async Task AddOutboxMessageAsync(OutboxMessage outboxMessage)
+    {
+        await orderContext.OutboxMessages.AddAsync(outboxMessage);
+        await orderContext.SaveChangesAsync();
+    }
 }

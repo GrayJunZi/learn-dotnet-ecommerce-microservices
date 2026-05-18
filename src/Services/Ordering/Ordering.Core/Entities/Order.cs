@@ -1,4 +1,6 @@
-﻿namespace Ordering.Core.Entities;
+﻿using Ordering.Core.Enums;
+
+namespace Ordering.Core.Entities;
 
 public class Order : EntityBase
 {
@@ -15,4 +17,5 @@ public class Order : EntityBase
     public string? CardExpiration { get; set; }
     public string? Cvv { get; set; }
     public int? PaymentMethod { get; set; }
+    public OrderStatus Status { get; set; } = OrderStatus.Pending;
 }

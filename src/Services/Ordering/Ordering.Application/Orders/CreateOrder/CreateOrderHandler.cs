@@ -10,6 +10,10 @@ public class CreateOrderHandler(IOrderRepository orderRepository) : ICommandHand
     {
         var order = command.ToEntity();
         var result = await orderRepository.AddAsync(order);
+
+        var outboxMessage = OrderMapper.ToOutboxMessage(result, command.CorrelationId);
+        await orderRepository.AddOutboxMessageAsync(outboxMessage);
+        
         return result.Id;
     }
 }

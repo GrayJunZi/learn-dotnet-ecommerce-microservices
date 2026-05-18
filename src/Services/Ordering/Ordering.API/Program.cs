@@ -1,6 +1,7 @@
 using EventBus.Messages.Common;
 using MassTransit;
 using Ordering.API.Extensions;
+using Ordering.Application.Dispatcher;
 using Ordering.Application.EventBusConsumer;
 using Ordering.Infrastructure.Data;
 
@@ -11,13 +12,7 @@ builder.Services.AddOpenApi();
 
 builder.Services.AddOrderingServices(builder.Configuration);
 
-var app = builder.Build();
-
-app.MigrateDatabase<OrderContext>((context, services) =>
-{
-    var logger = services.GetRequiredService<ILogger<OrderContextSeed>>();
-    OrderContextSeed.SeedAsync(context, logger).Wait();
-});
+builder.Services.AddHostedService<OutboxMessageDispatcher>();
 
 builder.Services.AddMassTransit(configure =>
 {
@@ -31,6 +26,14 @@ builder.Services.AddMassTransit(configure =>
                 c.ConfigureConsumer<BasketOrderingConsumer>(ctx);
             });
     });
+});
+
+var app = builder.Build();
+
+app.MigrateDatabase<OrderContext>((context, services) =>
+{
+    var logger = services.GetRequiredService<ILogger<OrderContextSeed>>();
+    OrderContextSeed.SeedAsync(context, logger).Wait();
 });
 
 if (app.Environment.IsDevelopment())
