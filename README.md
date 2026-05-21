@@ -3107,3 +3107,512 @@ SELECT * FROM OutboxMessages;
 - **可靠性**：即使服务崩溃，消息也不会丢失
 - **最终一致性**：通过重试机制确保消息最终被处理
 - **可追溯性**：Outbox 表提供完整的消息历史记录
+
+## 九、Payment 微服务
+
+Payment 微服务作为 SAGA 模式中的关键参与者，负责处理订单支付流程。它通过 RabbitMQ 监听订单创建事件，执行支付逻辑，并根据支付结果发布相应事件，驱动订单状态的流转。
+
+### 9.1 介绍
+
+Payment 微服务在整个 SAGA 流程中扮演"支付处理器"的角色：
+
+- **监听订单创建事件** - 当 Ordering 微服务通过 OutboxDispatcher 发布 `OrderCreatedEvent` 后进行支付处理
+- **执行支付逻辑** - 根据订单总金额判断支付成功或失败
+- **发布支付结果** - 成功发布 `PaymentCompletedEvent`，失败发布 `PaymentFailedEvent`
+- **驱动状态流转** - 下游消费者根据支付结果更新订单状态
+
+**SAGA 支付流程：**
+
+```
+Basket → Checkout → OrderCreated (Outbox) → Payment → PaymentCompleted/PaymentFailed → Order Status Update
+```
+
+### 9.2 创建 Payment 微服务
+
+Payment 微服务是一个独立的最小化 ASP.NET Core Web API 项目，不需要传统分层结构，直接使用 MassTransit 消费者处理消息。
+
+**项目结构：**
+
+```
+src/Services/Payment/
+└── Payment.API/
+    ├── Consumer/
+    │   └── OrderCreatedConsumer.cs    # 订单创建事件消费者
+    ├── Properties/
+    │   └── launchSettings.json
+    ├── Dockerfile
+    ├── Payment.API.csproj
+    ├── Payment.API.http
+    ├── Program.cs
+    ├── appsettings.Development.json
+    └── appsettings.json
+```
+
+### 9.3 安装 NuGet 包
+
+在 `Payment.API.csproj` 中添加必要的 NuGet 依赖：
+
+```xml
+<!-- Payment.API.csproj -->
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MassTransit" Version="9.1.1" />
+    <PackageReference Include="MassTransit.RabbitMQ" Version="9.1.1" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.8" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\Infrastructure\EventBus.Messages\EventBus.Messages.csproj" />
+  </ItemGroup>
+
+</Project>
+```
+
+| 包名 | 用途 |
+|------|------|
+| MassTransit | 分布式消息总线框架 |
+| MassTransit.RabbitMQ | RabbitMQ 传输层支持 |
+| EventBus.Messages | 共享事件消息契约 |
+| Microsoft.AspNetCore.OpenApi | OpenAPI 支持 |
+
+### 9.4 创建 Order Created Consumer
+
+`OrderCreatedConsumer` 是 Payment 微服务的核心组件，负责处理订单创建事件中的支付逻辑。
+
+```csharp
+// Consumer/OrderCreatedConsumer.cs
+using EventBus.Messages.Events;
+using MassTransit;
+
+namespace Payment.API.Consumer;
+
+public class OrderCreatedConsumer(
+    IPublishEndpoint publishEndpoint,
+    ILogger<OrderCreatedConsumer> logger) : IConsumer<OrderCreatedEvent>
+{
+    public async Task Consume(ConsumeContext<OrderCreatedEvent> context)
+    {
+        var message = context.Message;
+        logger.LogInformation("Processing Payment or Order Id: {OrderId}", message.Id);
+
+        await Task.Delay(1000);
+
+        if (message.TotalPrice > 0)
+        {
+            var completedEvent = new PaymentCompletedEvent
+            {
+                OrderId = message.Id,
+                CorrelationId = context.CorrelationId.Value,
+            };
+
+            await publishEndpoint.Publish(completedEvent);
+            logger.LogInformation(
+                "Payment successfully completed for Order Id: {OrderId} and Correlation Id: {Correlation}",
+                message.Id, context.CorrelationId);
+        }
+        else
+        {
+            var failedEvent = new PaymentFailedEvent
+            {
+                OrderId = message.Id,
+                CorrelationId = context.CorrelationId.Value,
+                Reason = "Total price was zero or negative.",
+            };
+
+            await publishEndpoint.Publish(failedEvent);
+            logger.LogWarning(
+                "Payment failed for Order Id: {OrderId} and Correlation Id: {Correlation}",
+                message.Id, context.CorrelationId);
+        }
+    }
+}
+```
+
+**核心逻辑说明：**
+
+| 步骤 | 操作 | 说明 |
+|------|------|------|
+| 1 | 接收消息 | 通过 MassTransit 接收 `OrderCreatedEvent` |
+| 2 | 模拟支付 | 使用 `Task.Delay` 模拟支付处理延迟 |
+| 3 | 判断结果 | `TotalPrice > 0` 则支付成功，否则失败 |
+| 4 | 发布事件 | 根据结果发布 `PaymentCompletedEvent` 或 `PaymentFailedEvent` |
+| 5 | 传递 CorrelationId | 保持 SAGA 追踪链的完整性 |
+
+### 9.5 配置 Program.cs
+
+在 Payment 微服务的 `Program.cs` 中配置 MassTransit 连接 RabbitMQ 并注册消费者。
+
+```csharp
+// Program.cs
+using EventBus.Messages.Common;
+using MassTransit;
+using Payment.API.Consumer;
+
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddOpenApi();
+
+builder.Services.AddMassTransit(config =>
+{
+    config.AddConsumer<OrderCreatedConsumer>();
+    config.UsingRabbitMq((ctx, cfg) =>
+    {
+        cfg.Host(builder.Configuration["EventBusSettings:HostAddress"]);
+        cfg.ReceiveEndpoint(EventBusConstants.OrderCreatedQueue, c =>
+        {
+            c.ConfigureConsumer<OrderCreatedConsumer>(ctx);
+        });
+    });
+});
+
+var app = builder.Build();
+
+if (app.Environment.IsDevelopment())
+{
+    app.MapOpenApi();
+}
+
+app.Run();
+```
+
+**配置文件 `appsettings.json`：**
+
+```json
+{
+  "EventBusSettings": {
+    "HostAddress": "amqp://guest:guest@localhost:5672"
+  }
+}
+```
+
+### 9.6 Payment Completed Consumer（在 Ordering 微服务中）
+
+Payment 微服务发布 `PaymentCompletedEvent` 后，Ordering 微服务需要监听并处理此事件，将订单状态更新为"已支付"。
+
+**PaymentCompletedEvent 事件定义：**
+
+```csharp
+// EventBus.Messages/Events/PaymentCompletedEvent.cs
+namespace EventBus.Messages.Events;
+
+public class PaymentCompletedEvent : BaseIntegrationEvent
+{
+    public int OrderId { get; set; }
+    public string UserName { get; set; }
+    public decimal TotalPrice { get; set; }
+    public DateTime TimeStamp { get; set; } = DateTime.UtcNow;
+}
+```
+
+**PaymentCompletedConsumer 消费者：**
+
+```csharp
+// Ordering.Application/EventBusConsumer/PaymentCompletedConsumer.cs
+using EventBus.Messages.Events;
+using MassTransit;
+using Microsoft.Extensions.Logging;
+using Ordering.Core.Repositories;
+
+namespace Ordering.Application.EventBusConsumer;
+
+public class PaymentCompletedConsumer(
+    IOrderRepository orderRepository,
+    ILogger<PaymentCompletedConsumer> logger) : IConsumer<PaymentCompletedEvent>
+{
+    public async Task Consume(ConsumeContext<PaymentCompletedEvent> context)
+    {
+        var order = await orderRepository.GetByIdAsync(context.Message.OrderId);
+        if (order == null)
+        {
+            logger.LogWarning("Order not found for Id: {OrderId} and CorrelationId: {CorrelationId}",
+                context.Message.OrderId, context.CorrelationId);
+            return;
+        }
+
+        order.Status = Core.Enums.OrderStatus.Paid;
+        await orderRepository.UpdateAsync(order);
+        logger.LogInformation("Order Id {OrderId} marked as Paid", context.Message.OrderId);
+    }
+}
+```
+
+### 9.7 Payment Failed Consumer（在 Ordering 微服务中）
+
+Payment 微服务支付失败后发布 `PaymentFailedEvent`，Ordering 微服务监听此事件将订单状态更新为"失败"。
+
+**PaymentFailedEvent 事件定义：**
+
+```csharp
+// EventBus.Messages/Events/PaymentFailedEvent.cs
+namespace EventBus.Messages.Events;
+
+public class PaymentFailedEvent : BaseIntegrationEvent
+{
+    public int OrderId { get; set; }
+    public string UserName { get; set; }
+    public string Reason { get; set; }
+    public DateTime TimeStamp { get; set; } = DateTime.UtcNow;
+}
+```
+
+**PaymentFailedConsumer 消费者：**
+
+```csharp
+// Ordering.Application/EventBusConsumer/PaymentFailedConsumer.cs
+using EventBus.Messages.Events;
+using MassTransit;
+using Microsoft.Extensions.Logging;
+using Ordering.Core.Repositories;
+
+namespace Ordering.Application.EventBusConsumer;
+
+public class PaymentFailedConsumer(
+    IOrderRepository orderRepository,
+    ILogger<PaymentFailedConsumer> logger) : IConsumer<PaymentFailedEvent>
+{
+    public async Task Consume(ConsumeContext<PaymentFailedEvent> context)
+    {
+        var order = await orderRepository.GetByIdAsync(context.Message.OrderId);
+        if (order == null)
+        {
+            logger.LogWarning("Order not found for Id: {OrderId} and CorrelationId: {CorrelationId}",
+                context.Message.OrderId, context.CorrelationId);
+            return;
+        }
+
+        order.Status = Core.Enums.OrderStatus.Failed;
+        await orderRepository.UpdateAsync(order);
+        logger.LogInformation("Payment failed for Order Id {OrderId}, Reason: {Reason}", context.Message.OrderId,
+            context.Message.Reason);
+    }
+}
+```
+
+### 9.8 配置 Ordering Program.cs
+
+在 Ordering.API 的 `Program.cs` 中注册 Payment 相关的消费者，使 Ordering 微服务能够接收支付完成和支付失败事件。
+
+```csharp
+// Ordering.API/Program.cs
+using EventBus.Messages.Common;
+using MassTransit;
+using Ordering.API.Extensions;
+using Ordering.Application.Dispatcher;
+using Ordering.Application.EventBusConsumer;
+using Ordering.Infrastructure.Data;
+
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddControllers();
+builder.Services.AddOpenApi();
+
+builder.Services.AddOrderingServices(builder.Configuration);
+
+builder.Services.AddHostedService<OutboxMessageDispatcher>();
+
+builder.Services.AddMassTransit(configure =>
+{
+    configure.AddConsumer<BasketOrderingConsumer>();
+    configure.AddConsumer<PaymentCompletedConsumer>();
+    configure.AddConsumer<PaymentFailedConsumer>();
+    configure.UsingRabbitMq((ctx, cfg) =>
+    {
+        cfg.Host(builder.Configuration["EventBusSettings:HostAddress"]);
+        cfg.ReceiveEndpoint(EventBusConstants.BasketCheckoutQueue,
+            c => { c.ConfigureConsumer<BasketOrderingConsumer>(ctx); });
+
+        cfg.ReceiveEndpoint(EventBusConstants.PaymentCompletedQueue,
+            c => { c.ConfigureConsumer<PaymentCompletedConsumer>(ctx); });
+
+        cfg.ReceiveEndpoint(EventBusConstants.PaymentFailedQueue,
+            c => { c.ConfigureConsumer<PaymentFailedConsumer>(ctx); });
+    });
+});
+
+var app = builder.Build();
+
+app.MigrateDatabase<OrderContext>((context, services) =>
+{
+    var logger = services.GetRequiredService<ILogger<OrderContextSeed>>();
+    OrderContextSeed.SeedAsync(context, logger).Wait();
+});
+
+if (app.Environment.IsDevelopment())
+{
+    app.MapOpenApi();
+}
+
+app.UseHttpsRedirection();
+app.Run();
+```
+
+**EventBusConstants 常量定义：**
+
+```csharp
+// EventBus.Messages/Common/EventBusConstants.cs
+namespace EventBus.Messages.Common;
+
+public class EventBusConstants
+{
+    public const string BasketCheckoutQueue = "basket-checkout-queue";
+    public const string OrderCreatedQueue = "order-created-queue";
+    public const string PaymentCompletedQueue = "payment-completed-queue";
+    public const string PaymentFailedQueue = "payment-failed-queue";
+}
+```
+
+**队列与消费者对应关系：**
+
+| 队列 | 消费者 | 微服务 | 方向 |
+|------|--------|--------|------|
+| basket-checkout-queue | BasketOrderingConsumer | Ordering | 接收 Basket 结账事件 |
+| order-created-queue | OrderCreatedConsumer | Payment | 接收订单创建事件 |
+| payment-completed-queue | PaymentCompletedConsumer | Ordering | 接收支付完成事件 |
+| payment-failed-queue | PaymentFailedConsumer | Ordering | 接收支付失败事件 |
+
+### 9.9 Docker 配置
+
+**Payment.API Dockerfile：**
+
+```dockerfile
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS base
+USER $APP_UID
+WORKDIR /app
+EXPOSE 8080
+EXPOSE 8081
+
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+ARG BUILD_CONFIGURATION=Release
+WORKDIR /src
+COPY ["src/Services/Payment/Payment.API/Payment.API.csproj", "src/Services/Payment/Payment.API/"]
+COPY ["src/Infrastructure/EventBus.Messages/EventBus.Messages.csproj", "src/Infrastructure/EventBus.Messages/"]
+RUN dotnet restore "src/Services/Payment/Payment.API/Payment.API.csproj"
+COPY . .
+WORKDIR "/src/src/Services/Payment/Payment.API"
+RUN dotnet build "./Payment.API.csproj" -c $BUILD_CONFIGURATION -o /app/build
+
+FROM build AS publish
+ARG BUILD_CONFIGURATION=Release
+RUN dotnet publish "./Payment.API.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false
+
+FROM base AS final
+WORKDIR /app
+COPY --from=publish /app/publish .
+ENTRYPOINT ["dotnet", "Payment.API.dll"]
+```
+
+**Docker Compose 配置（Payment 服务）：**
+
+```yaml
+# docker-compose.yml
+services:
+  # Payment 微服务
+  payment.api:
+    image: payment.api
+    build:
+      context: .
+      dockerfile: src/Services/Payment/Payment.API/Dockerfile
+    environment:
+      - EventBusSettings__HostAddress=amqp://guest:guest@rabbitmq:5672
+    depends_on:
+      - rabbitmq
+    ports:
+      - "8004:8080"
+```
+
+### 9.10 Pay 服务常见问题修复
+
+开发过程中需要注意以下问题：
+
+| 问题 | 原因 | 解决方案 |
+|------|------|----------|
+| 消费者未接收消息 | `AddMassTransit` 在 `builder.Build()` 之后调用 | 将 MassTransit 配置移到 `builder.Build()` 之前 |
+| CorrelationId 丢失 | 发布事件时未传递 CorrelationId | 从 `context.CorrelationId.Value` 传递到事件 |
+| 订单状态未更新 | Ordering 未注册 Payment 消费者 | 在 Ordering Program.cs 中注册 `PaymentCompletedConsumer` 和 `PaymentFailedConsumer` |
+| 队列绑定失败 | 队列名称不匹配 | 确保 EventBusConstants 与 ReceiveEndpoint 名称一致 |
+
+### 9.11 SAGA Outbox Pattern Demo
+
+**完整 SAGA 流程演示：**
+
+```
+┌─────────────┐     ┌──────────────┐     ┌───────────────┐     ┌──────────────┐
+│   Basket    │     │   Ordering   │     │   Payment     │     │   Ordering   │
+│   (Redis)   │     │  (SQL Server)│     │   (微服务)    │     │  (Consumer)  │
+└──────┬──────┘     └──────┬───────┘     └──────┬────────┘     └──────┬───────┘
+       │                   │                    │                     │
+       │ 1. BasketCheckout │                    │                     │
+       │──────────────────>│                    │                     │
+       │                   │                    │                     │
+       │                   │ 2. CreateOrder     │                     │
+       │                   │    + OutboxMessage │                     │
+       │                   │                    │                     │
+       │                   │ 3. OutboxDispatcher│                     │
+       │                   │    → RabbitMQ      │                     │
+       │                   │───────────────────>│                     │
+       │                   │                    │                     │
+       │                   │                    │ 4. OrderCreated     │
+       │                   │                    │    Consumer         │
+       │                   │                    │    (支付处理)        │
+       │                   │                    │                     │
+       │                   │                    │ 5a. PaymentCompleted│
+       │                   │                    │────────────────────>│
+       │                   │                    │                     │
+       │                   │                    │ 5b. PaymentFailed   │
+       │                   │                    │────────────────────>│
+       │                   │                    │                     │
+       │                   │                    │           6. Update │
+       │                   │                    │           Order     │
+       │                   │                    │           Status    │
+```
+
+**订单状态流转：**
+
+```
+Pending → Created → Paid (支付成功)
+                  → Failed (支付失败)
+```
+
+**验证步骤：**
+
+1. 启动所有服务（RabbitMQ、Basket、Ordering、Payment）：
+   ```bash
+   docker-compose up -d
+   ```
+
+2. 访问 RabbitMQ 管理界面查看队列：
+   ```
+   http://localhost:15672 (guest/guest)
+   ```
+
+3. 通过 Basket API 发起结账请求，触发完整 SAGA 流程
+
+4. 在 SQL Server 中查询订单状态变化：
+   ```sql
+   SELECT Id, UserName, TotalPrice, Status, CreatedDate 
+   FROM Orders 
+   ORDER BY CreatedDate DESC;
+   ```
+
+5. 在 SQL Server 中查询 OutboxMessages 消息处理状态：
+   ```sql
+   SELECT Id, Type, ProcessedDate, RetryCount, ErrorMessage 
+   FROM OutboxMessages 
+   ORDER BY CreatedDate DESC;
+   ```
+
+**关键设计优势：**
+
+- **原子性保证**：Outbox 模式确保订单创建和消息写入在同一数据库事务中
+- **消息可靠性**：即使 Payment 或 Ordering 服务临时不可用，消息不会丢失
+- **状态可追溯**：通过 OutboxMessages 表和订单 Status 字段完整追踪流程
+- **松耦合通信**：Basket、Ordering、Payment 三个微服务通过 RabbitMQ 异步通信，互不影响
+

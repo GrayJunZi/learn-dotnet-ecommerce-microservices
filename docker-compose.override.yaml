@@ -101,3 +101,11 @@ services:
     ports:
       - "8040:8080"
       - "8041:8081"
+        
+  payment.api:
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - EventBusSettings__HostAddress=amqp://guest:guest@rabbitmq:5672/
+    ports:
+      - "8050:8080"
+      - "8051:8081"

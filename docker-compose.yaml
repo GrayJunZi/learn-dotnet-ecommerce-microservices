@@ -35,6 +35,12 @@
       context: .
       dockerfile: src/Services/Ordering/Ordering.API/Dockerfile
 
+  payment.api:
+    image: payment.api
+    build:
+      context: .
+      dockerfile: src/Services/Payment/Payment.API/Dockerfile
+
   rabbitmq:
     image: rabbitmq:3-management-alpine
 

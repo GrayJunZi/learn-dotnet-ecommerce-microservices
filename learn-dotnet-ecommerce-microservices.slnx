@@ -37,4 +37,7 @@
     <Project Path="src/Services/Ordering/Ordering.Core/Ordering.Core.csproj" />
     <Project Path="src/Services/Ordering/Ordering.Infrastructure/Ordering.Infrastructure.csproj" />
   </Folder>
+  <Folder Name="/src/Services/Payment/">
+    <Project Path="src/Services/Payment/Payment.API/Payment.API.csproj" />
+  </Folder>
 </Solution>

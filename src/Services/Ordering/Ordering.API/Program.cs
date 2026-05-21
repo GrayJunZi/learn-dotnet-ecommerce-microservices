@@ -17,14 +17,19 @@ builder.Services.AddHostedService<OutboxMessageDispatcher>();
 builder.Services.AddMassTransit(configure =>
 {
     configure.AddConsumer<BasketOrderingConsumer>();
+    configure.AddConsumer<PaymentCompletedConsumer>();
+    configure.AddConsumer<PaymentFailedConsumer>();
     configure.UsingRabbitMq((ctx, cfg) =>
     {
         cfg.Host(builder.Configuration["EventBusSettings:HostAddress"]);
         cfg.ReceiveEndpoint(EventBusConstants.BasketCheckoutQueue,
-            c =>
-            {
-                c.ConfigureConsumer<BasketOrderingConsumer>(ctx);
-            });
+            c => { c.ConfigureConsumer<BasketOrderingConsumer>(ctx); });
+
+        cfg.ReceiveEndpoint(EventBusConstants.PaymentCompletedQueue,
+            c => { c.ConfigureConsumer<PaymentCompletedConsumer>(ctx); });
+
+        cfg.ReceiveEndpoint(EventBusConstants.PaymentFailedQueue,
+            c => { c.ConfigureConsumer<PaymentFailedConsumer>(ctx); });
     });
 });
 
