@@ -3616,3 +3616,556 @@ Pending → Created → Paid (支付成功)
 - **状态可追溯**：通过 OutboxMessages 表和订单 Status 字段完整追踪流程
 - **松耦合通信**：Basket、Ordering、Payment 三个微服务通过 RabbitMQ 异步通信，互不影响
 
+## 十、Identity 微服务
+
+Identity 微服务是一个独立的认证授权服务，基于 ASP.NET Core Identity 和 JWT（JSON Web Token）实现用户注册、登录和身份验证功能。它为整个电商微服务架构提供统一的身份管理和安全保障。
+
+### 10.1 创建 Identity 微服务解决方案
+
+Identity 微服务采用最小化 ASP.NET Core Web API 项目结构，集成 ASP.NET Core Identity 和 SQL Server 数据库。
+
+**项目结构：**
+
+```
+src/Services/Identity/
+└── Identity.API/
+    ├── Controllers/
+    │   └── AuthController.cs         # 认证控制器（注册/登录）
+    ├── DTOs/
+    │   ├── LoginDto.cs               # 登录请求 DTO
+    │   └── RegisterDto.cs            # 注册请求 DTO
+    ├── Data/
+    │   └── ApplicationDbContext.cs   # EF Core 数据库上下文
+    ├── Models/
+    │   └── ApplicationUser.cs        # 自定义用户模型
+    ├── Migrations/
+    │   └── 20260624064851_InitialCreate.cs
+    ├── Properties/
+    │   └── launchSettings.json
+    ├── Dockerfile
+    ├── Identity.API.csproj
+    ├── Identity.API.http
+    ├── Program.cs
+    ├── appsettings.Development.json
+    └── appsettings.json
+```
+
+### 10.2 创建 Identity Model 和 Context
+
+**ApplicationUser 模型：**
+
+```csharp
+// Models/ApplicationUser.cs
+using Microsoft.AspNetCore.Identity;
+
+namespace Identity.API.Models;
+
+public class ApplicationUser : IdentityUser
+{
+    public string Name { get; set; }
+}
+```
+
+**ApplicationDbContext 上下文：**
+
+```csharp
+// Data/ApplicationDbContext.cs
+using Identity.API.Models;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
+
+namespace Identity.API.Data;
+
+public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
+{
+    public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : base(options)
+    {
+    }
+}
+```
+
+**NuGet 包依赖：**
+
+```xml
+<!-- Identity.API.csproj -->
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.9" />
+    <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="10.0.9" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.9" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.9">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.9" />
+    <PackageReference Include="Swashbuckle.AspNetCore.Swagger" Version="10.2.3" />
+    <PackageReference Include="Swashbuckle.AspNetCore.SwaggerGen" Version="10.2.3" />
+    <PackageReference Include="Swashbuckle.AspNetCore.SwaggerUI" Version="10.2.3" />
+  </ItemGroup>
+
+</Project>
+```
+
+| 包名 | 用途 |
+|------|------|
+| Microsoft.AspNetCore.Identity.EntityFrameworkCore | ASP.NET Core Identity + EF Core |
+| Microsoft.EntityFrameworkCore.SqlServer | SQL Server 数据库支持 |
+| Microsoft.AspNetCore.Authentication.JwtBearer | JWT 认证中间件 |
+| Swashbuckle.AspNetCore.Swagger* | Swagger/OpenAPI 文档支持 |
+
+### 10.3 配置 App Settings
+
+**appsettings.json：**
+
+```json
+{
+  "ConnectionStrings": {
+    "IdentityConnection": "Server=localhost;Database=IdentityDb;Trusted_Connection=True;TrustServerCertificate=True;"
+  },
+  "Jwt": {
+    "Key": "learn-dotnet-ecommerce-microservices",
+    "Issuer": "learn-dotnet-ecommerce-microservices",
+    "Audience": "learn-dotnet-ecommerce-microservices",
+    "DurationInMinutes": 60
+  }
+}
+```
+
+**配置项说明：**
+
+| 配置项 | 值 | 说明 |
+|--------|-----|------|
+| ConnectionStrings:IdentityConnection | SQL Server 连接字符串 | Identity 数据库连接 |
+| Jwt:Key | 密钥字符串 | 用于签名 JWT 的对称密钥 |
+| Jwt:Issuer | 发行者名称 | JWT 的 iss 声明值 |
+| Jwt:Audience | 受众名称 | JWT 的 aud 声明值 |
+| Jwt:DurationInMinutes | 60 | Token 有效期（分钟） |
+
+### 10.4 配置 Program.cs
+
+```csharp
+// Program.cs
+using System.Text;
+using Identity.API.Data;
+using Identity.API.Models;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
+
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddOpenApi();
+
+builder.Services.AddDbContext<ApplicationDbContext>(options =>
+    options.UseSqlServer(builder.Configuration.GetConnectionString("IdentityConnection")));
+
+builder.Services.AddIdentity<ApplicationUser, IdentityRole>()
+    .AddEntityFrameworkStores<ApplicationDbContext>()
+    .AddDefaultTokenProviders();
+
+var jwtConfig = builder.Configuration.GetSection("Jwt");
+builder.Services.AddAuthentication(options =>
+{
+    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+}).AddJwtBearer(options =>
+{
+    options.RequireHttpsMetadata = false;
+    options.TokenValidationParameters = new TokenValidationParameters
+    {
+        ValidateIssuer = true,
+        ValidateAudience = true,
+        ValidateLifetime = true,
+        ValidateIssuerSigningKey = true,
+        ValidIssuer = jwtConfig["Issuer"],
+        ValidAudience = jwtConfig["Audience"],
+        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtConfig["Key"]))
+    };
+});
+
+builder.Services.AddAuthorization();
+builder.Services.AddControllers();
+
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+
+var app = builder.Build();
+
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+    app.MapOpenApi();
+}
+
+app.UseAuthentication();
+app.UseAuthorization();
+
+app.MapControllers();
+
+app.Run();
+```
+
+**配置流程：**
+
+```
+AddDbContext → AddIdentity → AddAuthentication → AddAuthorization → AddControllers
+                    ↓               ↓
+              EF Core 配置     JWT Bearer 配置
+```
+
+### 10.5 创建 DTOs
+
+**RegisterDto（注册请求）：**
+
+```csharp
+// DTOs/RegisterDto.cs
+namespace Identity.API.DTOs;
+
+public record RegisterDto(
+    string Name,
+    string Email,
+    string Password);
+```
+
+**LoginDto（登录请求）：**
+
+```csharp
+// DTOs/LoginDto.cs
+namespace Identity.API.DTOs;
+
+public record LoginDto(
+    string Email,
+    string Password);
+```
+
+### 10.6 创建 Authentication Controller
+
+```csharp
+// Controllers/AuthController.cs
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text;
+using Identity.API.DTOs;
+using Identity.API.Models;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.IdentityModel.Tokens;
+using JwtRegisteredClaimNames = Microsoft.IdentityModel.JsonWebTokens.JwtRegisteredClaimNames;
+
+namespace Identity.API.Controllers;
+
+[ApiController]
+[Route("api/[controller]")]
+public class AuthController(
+    UserManager<ApplicationUser> userManager,
+    SignInManager<ApplicationUser> signInManager,
+    IConfiguration configuration,
+    ILogger<AuthController> logger) : ControllerBase
+{
+    [HttpPost]
+    public async Task<IActionResult> Register(RegisterDto register)
+    {
+        var user = new ApplicationUser
+        {
+            UserName = register.Email,
+            Email = register.Email,
+            Name = register.Name,
+        };
+
+        var result = await userManager.CreateAsync(user, register.Password);
+        logger.LogInformation($"User {register.Email} registration attempted.");
+
+        if (!result.Succeeded)
+            return BadRequest(result.Errors);
+
+        return Ok(new { Message = "Registration successfully" });
+    }
+
+    [HttpPost("login")]
+    public async Task<IActionResult> Login(LoginDto login)
+    {
+        var user = await userManager.FindByEmailAsync(login.Email);
+        if (user == null || !await userManager.CheckPasswordAsync(user, login.Password))
+            return Unauthorized();
+
+        var token = generateToken(user);
+        logger.LogInformation($"User {login.Email} logged in successfully.");
+        return Ok(new { Token = token });
+    }
+
+    private string generateToken(ApplicationUser user)
+    {
+        var claims = new[]
+        {
+            new Claim(JwtRegisteredClaimNames.Sub, user.Email),
+            new Claim(ClaimTypes.Name, user.UserName),
+            new Claim("uid", user.Id),
+        };
+
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(configuration["Jwt:Key"]));
+        var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+
+        var token = new JwtSecurityToken(
+            issuer: configuration["Jwt:Issuer"],
+            audience: configuration["Jwt:Audience"],
+            claims: claims,
+            expires: DateTime.UtcNow.AddMinutes(Convert.ToDouble(configuration["Jwt:DurationInMinutes"])),
+            signingCredentials: credentials
+        );
+
+        logger.LogInformation($"JWT Token Generated for user {user.Email}");
+        return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+}
+```
+
+**API 端点：**
+
+| 端点 | 方法 | 功能 | 参数 | 返回值 |
+|------|------|------|------|--------|
+| `/api/auth` | POST | 用户注册 | `RegisterDto` | `{ Message: "Registration successfully" }` |
+| `/api/auth/login` | POST | 用户登录 | `LoginDto` | `{ Token: "JWT_TOKEN" }` |
+
+**JWT Token 结构：**
+
+```json
+{
+  "sub": "user@example.com",
+  "name": "user@example.com",
+  "uid": "550e8400-e29b-41d4-a716-446655440000",
+  "iss": "learn-dotnet-ecommerce-microservices",
+  "aud": "learn-dotnet-ecommerce-microservices",
+  "exp": 1719175200
+}
+```
+
+### 10.7 修改 Launch Settings
+
+**launchSettings.json：**
+
+```json
+{
+  "$schema": "https://json.schemastore.org/launchsettings.json",
+  "profiles": {
+    "http": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": false,
+      "applicationUrl": "http://localhost:5265",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    },
+    "https": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": false,
+      "applicationUrl": "https://localhost:7045;http://localhost:5265",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    }
+  }
+}
+```
+
+**端口配置：**
+
+| 配置 | 端口 |
+|------|------|
+| HTTP | 5265 |
+| HTTPS | 7045 |
+
+### 10.8 Docker 配置
+
+**Dockerfile：**
+
+```dockerfile
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS base
+USER $APP_UID
+WORKDIR /app
+EXPOSE 8080
+EXPOSE 8081
+
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+ARG BUILD_CONFIGURATION=Release
+WORKDIR /src
+COPY ["src/Services/Identity/Identity.API/Identity.API.csproj", "src/Services/Identity/Identity.API/"]
+RUN dotnet restore "src/Services/Identity/Identity.API/Identity.API.csproj"
+COPY . .
+WORKDIR "/src/src/Services/Identity/Identity.API"
+RUN dotnet build "./Identity.API.csproj" -c $BUILD_CONFIGURATION -o /app/build
+
+FROM build AS publish
+ARG BUILD_CONFIGURATION=Release
+RUN dotnet publish "./Identity.API.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false
+
+FROM base AS final
+WORKDIR /app
+COPY --from=publish /app/publish .
+ENTRYPOINT ["dotnet", "Identity.API.dll"]
+```
+
+**Docker Compose 配置：**
+
+```yaml
+# docker-compose.yml
+services:
+  identity.api:
+    image: identity.api
+    build:
+      context: .
+      dockerfile: src/Services/Identity/Identity.API/Dockerfile
+    environment:
+      - ConnectionStrings__IdentityConnection=Server=sqlserver;Database=IdentityDb;User Id=sa;Password=Password@123;TrustServerCertificate=True;
+    depends_on:
+      - sqlserver
+    ports:
+      - "5265:8080"
+```
+
+### 10.9 应用数据库迁移
+
+**创建迁移命令：**
+
+```bash
+cd src/Services/Identity/Identity.API
+dotnet ef migrations add InitialCreate --project . --startup-project .
+```
+
+**应用迁移命令：**
+
+```bash
+cd src/Services/Identity/Identity.API
+dotnet ef database update --project . --startup-project .
+```
+
+**生成的数据库表：**
+
+| 表名 | 用途 |
+|------|------|
+| AspNetUsers | 用户信息 |
+| AspNetRoles | 角色信息 |
+| AspNetUserRoles | 用户-角色关联 |
+| AspNetUserClaims | 用户声明 |
+| AspNetUserLogins | 用户登录信息 |
+| AspNetUserTokens | 用户令牌 |
+
+### 10.10 JWT Demo
+
+**完整认证流程演示：**
+
+```
+┌─────────────┐     ┌──────────────────┐     ┌──────────────┐
+│   Client    │     │   Identity.API   │     │   SQL Server │
+│ (Browser/   │     │   (AuthService)  │     │  (IdentityDb)│
+│  API Client)│     │                  │     │              │
+└──────┬──────┘     └────────┬─────────┘     └───────┬──────┘
+       │                     │                       │
+       │ 1. POST /api/auth   │                       │
+       │    (RegisterDto)    │                       │
+       │────────────────────>│                       │
+       │                     │ 2. CreateAsync       │
+       │                     │──────────────────────>│
+       │                     │                       │
+       │ 3. 200 OK           │                       │
+       │    { Message }      │                       │
+       │<────────────────────│                       │
+       │                     │                       │
+       │ 4. POST /api/auth/  │                       │
+       │    login            │                       │
+       │    (LoginDto)       │                       │
+       │────────────────────>│                       │
+       │                     │ 5. FindByEmailAsync  │
+       │                     │──────────────────────>│
+       │                     │                       │
+       │                     │ 6. CheckPasswordAsync│
+       │                     │──────────────────────>│
+       │                     │                       │
+       │                     │ 7. 生成 JWT Token    │
+       │                     │                       │
+       │ 8. 200 OK           │                       │
+       │    { Token }        │                       │
+       │<────────────────────│                       │
+       │                     │                       │
+       │ 9. 请求其他微服务    │                       │
+       │    Authorization:   │                       │
+       │    Bearer <token>   │                       │
+       │────────────────────>│                       │
+```
+
+**验证步骤：**
+
+1. **注册用户：**
+   ```bash
+   curl -X POST http://localhost:5265/api/auth \
+     -H "Content-Type: application/json" \
+     -d '{
+       "name": "John Doe",
+       "email": "john@example.com",
+       "password": "Password@123"
+     }'
+   ```
+   返回：`{ "message": "Registration successfully" }`
+
+2. **登录获取 Token：**
+   ```bash
+   curl -X POST http://localhost:5265/api/auth/login \
+     -H "Content-Type: application/json" \
+     -d '{
+       "email": "john@example.com",
+       "password": "Password@123"
+     }'
+   ```
+   返回：`{ "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." }`
+
+3. **使用 Token 访问受保护资源：**
+   ```bash
+   curl -X GET http://localhost:5001/api/orders \
+     -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+   ```
+
+**访问 Swagger 文档：**
+
+```
+http://localhost:5265/swagger/index.html
+```
+
+**JWT Token 解码示例：**
+
+```json
+{
+  "alg": "HS256",
+  "typ": "JWT"
+}
+.
+{
+  "sub": "john@example.com",
+  "name": "john@example.com",
+  "uid": "550e8400-e29b-41d4-a716-446655440000",
+  "iss": "learn-dotnet-ecommerce-microservices",
+  "aud": "learn-dotnet-ecommerce-microservices",
+  "nbf": 1719175200,
+  "exp": 1719178800
+}
+```
+
+**安全注意事项：**
+
+| 风险 | 解决方案 |
+|------|----------|
+| 密钥泄露 | 使用环境变量存储密钥，生产环境使用更长的随机密钥 |
+| Token 劫持 | 使用 HTTPS，设置合理的 Token 过期时间 |
+| 密码泄露 | ASP.NET Core Identity 自动使用 BCrypt 哈希存储密码 |
+| 无状态认证 | 使用 HttpOnly Cookie 或 Authorization Header 传递 Token |
+

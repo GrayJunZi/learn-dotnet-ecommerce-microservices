@@ -46,6 +46,22 @@ services:
       timeout: 10s
       retries: 3
       
+  identity.db:
+    container_name: identity.db
+    environment:
+      - SA_PASSWORD=Password@123
+      - ACCEPT_EULA=Y
+    restart: always
+    ports:
+      - "1434:1433"
+    volumes:
+      - identitydb_data:/var/opt/mssql
+    healthcheck:
+      test: [ "CMD-SHELL","/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P 'Password@123' -Q 'select 1'" ]
+      interval: 10s
+      timeout: 10s
+      retries: 3
+  
   rabbitmq:
     container_name: rabbitmq
     restart: always
@@ -109,3 +125,17 @@ services:
     ports:
       - "8050:8080"
       - "8051:8081"
+  
+  identity.api:
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - DatabaseSettings__ConnectionString=Server=identity.db;Port=1434;Database=IdentityDb;User Id=sa;Password=Password@123
+      - Jwt__Key=super_secure_secret_key1234567890-!@#$%^&*()_+
+      - Jwt__Issuer=learn-dotnet-ecommerce-microservices
+      - Jwt__Audience=learn-dotnet-ecommerce-microservices
+      - Jwt_DurationInMinutes=60
+    depends_on:
+      - identity.db
+    ports:
+      - "8060:8080"
+      - "8061:8081"
