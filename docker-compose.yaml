@@ -53,8 +53,14 @@
   rabbitmq:
     image: rabbitmq:3-management-alpine
 
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.3.6    
+  kibana:
+    image: docker.elastic.co/kibana/kibana:9.3.6    
+
 volumes:
   mongo_data:
   postgres_data:
   sqlserver_data:
   identitydb_data:
+  elasticsearch_data:

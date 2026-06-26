@@ -4169,3 +4169,321 @@ http://localhost:5265/swagger/index.html
 | 密码泄露 | ASP.NET Core Identity 自动使用 BCrypt 哈希存储密码 |
 | 无状态认证 | 使用 HttpOnly Cookie 或 Authorization Header 传递 Token |
 
+## 十一、实现 ELK
+
+### 1. 创建 Logging 项目
+
+创建独立的日志基础设施项目 `Infrastructure.Logging`，用于集中管理 Serilog 配置和 Elasticsearch 集成。
+
+**项目结构：**
+```
+src/Infrastructure/Infrastructure.Logging/
+├── Infrastructure.Logging.csproj
+└── Logging.cs
+```
+
+### 2. 添加所需的 NuGet 包
+
+在 `Infrastructure.Logging` 项目中添加以下依赖：
+
+| 包名 | 版本 | 说明 |
+|------|------|------|
+| Elastic.Serilog.Sinks | 9.0.0 | Serilog 的 Elasticsearch 输出插件 |
+| Serilog.AspNetCore | 10.0.0 | Serilog 的 ASP.NET Core 集成 |
+| Serilog.Enrichers.Environment | 3.0.1 | 添加环境变量信息到日志 |
+| Serilog.Exceptions | 8.4.0 | 异常详情 enricher |
+| Serilog.Sinks.Console | 6.1.1 | 控制台日志输出 |
+| Microsoft.Extensions.Configuration | 10.0.9 | 配置绑定 |
+
+**csproj 文件内容：**
+```xml
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Elastic.Serilog.Sinks" Version="9.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.0.9" />
+    <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
+    <PackageReference Include="Serilog.Enrichers.Environment" Version="3.0.1" />
+    <PackageReference Include="Serilog.Exceptions" Version="8.4.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
+  </ItemGroup>
+</Project>
+```
+
+### 3. 添加项目引用
+
+在所有需要启用日志的微服务项目中添加对 `Infrastructure.Logging` 的项目引用：
+
+- Catalog.API
+- Basket.API
+- Discount.API
+- Ordering.API
+- Payment.API
+- Identity.API
+
+### 4. 创建日志扩展方法
+
+在 `Infrastructure.Logging/Logging.cs` 中创建静态配置类，提供统一的日志配置：
+
+```csharp
+namespace Infrastructure.Logging;
+
+public static class Logging
+{
+    public static Action<HostBuilderContext, LoggerConfiguration> ConfigureLogger => 
+        (context, loggerConfiguration) =>
+    {
+        var env = context.HostingEnvironment;
+        var configuration = context.Configuration;
+
+        loggerConfiguration
+            .MinimumLevel.Information()
+            .MinimumLevel.Override("System", LogEventLevel.Warning)
+            .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
+            .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
+            .Enrich.FromLogContext()
+            .Enrich.WithProperty("ApplicationName", env.ApplicationName)
+            .Enrich.WithProperty("Environment", env.EnvironmentName)
+            .Enrich.WithExceptionDetails()
+            .WriteTo.Console();
+
+        if (env.IsDevelopment())
+        {
+            loggerConfiguration.MinimumLevel.Debug();
+        }
+
+        var elasticUri = configuration.GetValue<string>("ElasticConfiguration:Uri");
+
+        if (!string.IsNullOrWhiteSpace(elasticUri))
+        {
+            var dataStream = new DataStreamName(
+                "logs",
+                env.ApplicationName?.ToLower().Replace('.', '-') ?? "unknown",
+                env.EnvironmentName?.ToLower() ?? "development"
+            );
+
+            loggerConfiguration.WriteTo.Elasticsearch(
+                new[] { new Uri(elasticUri) },
+                opts =>
+                {
+                    opts.DataStream = dataStream;
+                    opts.BootstrapMethod = BootstrapMethod.Failure;
+                },
+                _ => { }
+            );
+        }
+    };
+}
+```
+
+**配置说明：**
+
+| 配置项 | 说明 |
+|--------|------|
+| MinimumLevel | 默认信息级别，开发环境降级为 Debug |
+| System/Microsoft 日志 | 仅显示警告及以上级别 |
+| Enrich.FromLogContext | 从日志上下文补充信息 |
+| Enrich.WithProperty | 添加应用名称和环境名称 |
+| Enrich.WithExceptionDetails | 记录异常详细信息 |
+| WriteTo.Console | 输出到控制台 |
+| WriteTo.Elasticsearch | 输出到 Elasticsearch（如果配置了 URI） |
+
+### 5. 在 Catalog Service 中引入日志
+
+在 `Catalog.API/Program.cs` 中添加日志配置：
+
+```csharp
+using Infrastructure.Logging;
+using Serilog;
+
+// ... 其他配置 ...
+
+builder.Host.UseSerilog(Logging.ConfigureLogger);
+
+var app = builder.Build();
+// ... 其余代码 ...
+```
+
+同时在 `appsettings.json` 中添加 Elasticsearch 配置（可选，用于本地开发）：
+
+```json
+{
+  "ElasticConfiguration": {
+    "Uri": "http://localhost:9200"
+  }
+}
+```
+
+### 6. 在其他微服务中进行相同的日志配置
+
+对所有微服务项目执行相同操作：
+
+**6.1 添加项目引用：**
+```xml
+<ProjectReference Include="..\..\Infrastructure\Infrastructure.Logging\Infrastructure.Logging.csproj" />
+```
+
+**6.2 Program.cs 中添加 Serilog：**
+```csharp
+using Infrastructure.Logging;
+using Serilog;
+
+builder.Host.UseSerilog(Logging.ConfigureLogger);
+```
+
+**6.3 涉及的服务列表：**
+
+| 服务 | 项目路径 |
+|------|----------|
+| Catalog.API | src/Services/Catalog/Catalog.API/ |
+| Basket.API | src/Services/Basket/Basket.API/ |
+| Discount.API | src/Services/Discount/Discount.API/ |
+| Ordering.API | src/Services/Ordering/Ordering.API/ |
+| Payment.API | src/Services/Payment/Payment.API/ |
+| Identity.API | src/Services/Identity/Identity.API/ |
+
+### 7. 更新 Docker 配置
+
+**7.1 为各微服务创建 Dockerfile：**
+
+以 Catalog.API 为例：
+```dockerfile
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS base
+USER $APP_UID
+WORKDIR /app
+EXPOSE 8080
+EXPOSE 8081
+
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+ARG BUILD_CONFIGURATION=Release
+WORKDIR /src
+COPY ["src/Services/Catalog/Catalog.API/Catalog.API.csproj", "src/Services/Catalog/Catalog.API/"]
+COPY ["src/Services/Catalog/Catalog.Application/Catalog.Application.csproj", "src/Services/Catalog/Catalog.Application/"]
+COPY ["src/Services/Catalog/Catalog.Core/Catalog.Core.csproj", "src/Services/Catalog/Catalog.Core/"]
+COPY ["src/Services/Catalog/Catalog.Infrastructure/Catalog.Infrastructure.csproj", "src/Services/Catalog/Catalog.Infrastructure/"]
+COPY ["src/Infrastructure/EventBus.Messages/EventBus.Messages.csproj", "src/Infrastructure/EventBus.Messages/"]
+COPY ["src/Infrastructure/Infrastructure.Logging/Infrastructure.Logging.csproj", "src/Infrastructure/Infrastructure.Logging/"]
+RUN dotnet restore "src/Services/Catalog/Catalog.API/Catalog.API.csproj"
+COPY . .
+WORKDIR "/src/src/Services/Catalog/Catalog.API"
+RUN dotnet build "./Catalog.API.csproj" -c $BUILD_CONFIGURATION -o /app/build
+
+FROM build AS publish
+ARG BUILD_CONFIGURATION=Release
+RUN dotnet publish "./Catalog.API.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false
+
+FROM base AS final
+WORKDIR /app
+COPY --from=publish /app/publish .
+ENTRYPOINT ["dotnet", "Catalog.API.dll"]
+```
+
+**7.2 更新 docker-compose.yaml，添加 Elasticsearch 和 Kibana 服务：**
+
+```yaml
+services:
+  # ... 现有服务 ...
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.3.6
+  
+  kibana:
+    image: docker.elastic.co/kibana/kibana:9.3.6
+
+volumes:
+  # ... 现有卷 ...
+  elasticsearch_data:
+```
+
+**7.3 更新 docker-compose.override.yaml，配置环境变量：**
+
+为每个微服务添加 Elasticsearch 连接配置：
+```yaml
+environment:
+  - ElasticConfiguration__Uri=http://elasticsearch:9200
+```
+
+添加 Elasticsearch 和 Kibana 的详细配置：
+```yaml
+elasticsearch:
+  container_name: elasticsearch
+  environment:
+    - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    - discovery.type=single-node
+    - xpack.security.enabled=false
+  ports:
+    - "9200:9200"
+  volumes:
+    - elasticsearch_data:/usr/share/elasticsearch/data
+
+kibana:
+  container_name: kibana
+  environment:
+    - ELASTICSEARCH_URL=http://elasticsearch:9200
+  depends_on:
+    - elasticsearch
+  ports:
+    - "5601:5601"
+```
+
+### 8. 启动与验证
+
+**8.1 启动所有服务：**
+```bash
+docker-compose up -d
+```
+
+**8.2 验证 Elasticsearch 是否运行：**
+```bash
+curl http://localhost:9200
+```
+
+**8.3 访问 Kibana：**
+```
+http://localhost:5601
+```
+
+**8.4 在 Kibana 中查看日志：**
+
+1. 进入 **Stack Management** -> **Index Patterns**
+2. 创建 Index Pattern：`logs-catalog-api-development`
+3. 进入 **Discover** 页面查看实时日志
+4. 可以按应用名称筛选：`ApplicationName: catalog.api`
+
+### 9. 日志数据流
+
+```
+┌─────────────┐     ┌──────────────┐     ┌─────────────────┐
+│  Microservice │──→│  Serilog     │──→│  Elasticsearch   │
+│  (Catalog)   │     │  (Logging)   │     │  (Port 9200)     │
+└─────────────┘     └──────────────┘     └─────────────────┘
+                            │                      │
+                            ▼                      ▼
+                     Console Output          Kibana UI
+                                              (Port 5601)
+```
+
+### 10. 日志 enricher 说明
+
+| Enricher | 作用 | 示例值 |
+|----------|------|--------|
+| FromLogContext | 从日志上下文添加额外属性 | 请求 ID、用户 ID |
+| WithProperty(ApplicationName) | 添加应用名称 | "catalog.api" |
+| WithProperty(Environment) | 添加环境名称 | "development" |
+| WithExceptionDetails | 格式化异常详情 | 堆栈跟踪、内联展示 |
+
+### 11. 优势总结
+
+| 特性 | 说明 |
+|------|------|
+| 集中式日志 | 所有微服务的日志统一存储到 Elasticsearch |
+| 结构化查询 | 支持复杂的查询和过滤条件 |
+| 可视化分析 | 通过 Kibana 进行日志分析和可视化 |
+| 异常详情 | 自动内联展示异常信息，便于排查问题 |
+| 环境隔离 | 通过 DataStream 区分不同环境和应用 |
+| 可扩展性 | 可以轻松添加更多微服务和日志源 |

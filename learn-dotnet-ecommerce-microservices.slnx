@@ -11,6 +11,7 @@
   <Folder Name="/src/" />
   <Folder Name="/src/Infrastructure/">
     <Project Path="src/Infrastructure/EventBus.Messages/EventBus.Messages.csproj" />
+    <Project Path="src/Infrastructure/Infrastructure.Logging/Infrastructure.Logging.csproj" />
   </Folder>
   <Folder Name="/src/Services/" />
   <Folder Name="/src/Services/Basket/">

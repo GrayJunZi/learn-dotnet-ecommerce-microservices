@@ -77,6 +77,7 @@ services:
       - DatabaseSettings__ProductCollectionName=Products
       - DatabaseSettings__BrandCollectionName=Brands
       - DatabaseSettings__TypeCollectionName=Types
+      - ElasticConfiguration__Uri=http://elasticsearch:9200
     depends_on:
       - catalog.db
     ports:
@@ -89,6 +90,7 @@ services:
       - CacheSettings__ConnectionString=basket.db:6379
       - GrpcSettings__DiscountUrl=http://discount.api:8080
       - EventBusSettings__HostAddress=amqp://guest:guest@rabbitmq:5672/
+      - ElasticConfiguration__Uri=http://elasticsearch:9200
     depends_on:
       - basket.db
       - rabbitmq
@@ -100,6 +102,7 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - DatabaseSettings__ConnectionString=Server=discount.db;Port=5432;Database=DiscountDb;User Id=admin;Password=Password@123
+      - ElasticConfiguration__Uri=http://elasticsearch:9200
     depends_on:
       - discount.db
     ports:
@@ -111,6 +114,7 @@ services:
       - ASPNETCORE_ENVIRONMENT=Development
       - DatabaseSettings__ConnectionString=Server=ordering.db;Port=1433;Database=OrderingDb;User Id=sa;Password=Password@123
       - EventBusSettings__HostAddress=amqp://guest:guest@rabbitmq:5672/
+      - ElasticConfiguration__Uri=http://elasticsearch:9200
     depends_on:
       - ordering.db
       - rabbitmq
@@ -122,6 +126,7 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - EventBusSettings__HostAddress=amqp://guest:guest@rabbitmq:5672/
+      - ElasticConfiguration__Uri=http://elasticsearch:9200
     ports:
       - "8050:8080"
       - "8051:8081"
@@ -134,8 +139,29 @@ services:
       - Jwt__Issuer=learn-dotnet-ecommerce-microservices
       - Jwt__Audience=learn-dotnet-ecommerce-microservices
       - Jwt_DurationInMinutes=60
+      - ElasticConfiguration__Uri=http://elasticsearch:9200
     depends_on:
       - identity.db
     ports:
       - "8060:8080"
       - "8061:8081"
+
+  elasticsearch:
+    container_name: elasticsearch
+    environment:
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+
+  kibana:
+    container_name: kibana
+    environment:
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+    depends_on:
+      - elasticsearch
+    ports:
+      - "5601:5601"

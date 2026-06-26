@@ -1,4 +1,4 @@
-﻿using Catalog.Application.Commands;
+using Catalog.Application.Commands;
 using Catalog.Application.DTOs;
 using Catalog.Application.Mappers;
 using Catalog.Application.Queries;
@@ -10,11 +10,12 @@ namespace Catalog.API.Controllers;
 
 [ApiController]
 [Route("/api/v1/[controller]")]
-public class CatalogController(IMediator mediator) : ControllerBase
+public class CatalogController(IMediator mediator, ILogger<CatalogController> logger) : ControllerBase
 {
     [HttpGet("GetAllProducts")]
     public async Task<IActionResult> GetProducts([FromQuery] CatalogSpecParams catalogSpecParams)
     {
+        logger.LogInformation("Fetching products with {@filter}", catalogSpecParams);
         var query = new GetAllProductsQuery(catalogSpecParams);
         var result = await mediator.Send(query);
         return Ok(result);
@@ -74,7 +75,7 @@ public class CatalogController(IMediator mediator) : ControllerBase
         var result = await mediator.Send(query);
         return Ok(result);
     }
-    
+
     [HttpGet("GetAllTypes")]
     public async Task<IActionResult> GetAllTypes()
     {

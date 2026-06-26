@@ -9,6 +9,7 @@ ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 COPY ["src/Services/Payment/Payment.API/Payment.API.csproj", "src/Services/Payment/Payment.API/"]
 COPY ["src/Infrastructure/EventBus.Messages/EventBus.Messages.csproj", "src/Infrastructure/EventBus.Messages/"]
+COPY ["src/Infrastructure/Infrastructure.Logging/Infrastructure.Logging.csproj", "src/Infrastructure/Infrastructure.Logging/"]
 RUN dotnet restore "src/Services/Payment/Payment.API/Payment.API.csproj"
 COPY . .
 WORKDIR "/src/src/Services/Payment/Payment.API"
