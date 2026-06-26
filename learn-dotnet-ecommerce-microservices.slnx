@@ -9,6 +9,9 @@
     <File Path="docker-compose.yaml" />
   </Folder>
   <Folder Name="/src/" />
+  <Folder Name="/src/ApiGateway/">
+    <Project Path="src/ApiGateway/ApiGateway/ApiGateway.csproj" />
+  </Folder>
   <Folder Name="/src/Infrastructure/">
     <Project Path="src/Infrastructure/EventBus.Messages/EventBus.Messages.csproj" />
     <Project Path="src/Infrastructure/Infrastructure.Logging/Infrastructure.Logging.csproj" />

@@ -50,11 +50,18 @@
       context: .
       dockerfile: src/Services/Identity/Identity.API/Dockerfile
 
+  ocelot.apigateway:
+    image: ocelot.apigateway
+    build:
+      context: .
+      dockerfile: src/ApiGateway/ApiGateway/Dockerfile
+
   rabbitmq:
     image: rabbitmq:3-management-alpine
 
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:9.3.6    
+
   kibana:
     image: docker.elastic.co/kibana/kibana:9.3.6    
 

@@ -135,7 +135,7 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - DatabaseSettings__ConnectionString=Server=identity.db;Port=1434;Database=IdentityDb;User Id=sa;Password=Password@123
-      - Jwt__Key=super_secure_secret_key1234567890-!@#$%^&*()_+
+      - "Jwt__Key=super_secure_secret_key1234567890@#*&!@%_"
       - Jwt__Issuer=learn-dotnet-ecommerce-microservices
       - Jwt__Audience=learn-dotnet-ecommerce-microservices
       - Jwt_DurationInMinutes=60
@@ -145,6 +145,23 @@ services:
     ports:
       - "8060:8080"
       - "8061:8081"
+        
+  ocelot.apigateway:
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - "Jwt__Key=super_secure_secret_key1234567890@#*&!@%_"
+      - Jwt__Issuer=learn-dotnet-ecommerce-microservices
+      - Jwt__Audience=learn-dotnet-ecommerce-microservices
+      - Jwt_DurationInMinutes=60
+    depends_on:
+      - identity.api
+      - catalog.api
+      - basket.api
+      - ordering.api
+      - payment.api
+      - discount.api
+    ports:
+      - "8010:8080"
 
   elasticsearch:
     container_name: elasticsearch

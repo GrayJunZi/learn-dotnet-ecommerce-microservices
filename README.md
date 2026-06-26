@@ -4487,3 +4487,388 @@ http://localhost:5601
 | 异常详情 | 自动内联展示异常信息，便于排查问题 |
 | 环境隔离 | 通过 DataStream 区分不同环境和应用 |
 | 可扩展性 | 可以轻松添加更多微服务和日志源 |
+
+# 十二、实现 API 网关
+
+### 1. 创建 API Gateway 项目
+
+创建独立的 API 网关服务 `ApiGateway`，作为所有微服务的统一入口，负责路由、认证和跨域等横切关注点。
+
+**项目结构：**
+```
+src/ApiGateway/ApiGateway/
+├── ApiGateway.csproj
+├── Program.cs
+├── appsettings.json
+├── appsettings.Development.json
+├── ocelot.Development.json
+├── Middleware/
+│   └── CorrelationIdMiddleware.cs
+├── Dockerfile
+└── Properties/launchSettings.json
+```
+
+### 2. 安装所需的 NuGet 包
+
+| 包名 | 版本 | 说明 |
+|------|------|------|
+| Ocelot | 24.1.0 | API 网关路由中间件 |
+| Microsoft.AspNetCore.Authentication.JwtBearer | 10.0.9 | JWT Bearer 认证 |
+| Microsoft.AspNetCore.Cors | 2.3.11 | 跨域资源共享 |
+| Microsoft.AspNetCore.OpenApi | 10.0.0 | OpenAPI 支持 |
+| Serilog | 4.3.1 | 结构化日志 |
+
+**csproj 文件内容：**
+```xml
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.9" />
+    <PackageReference Include="Microsoft.AspNetCore.Cors" Version="2.3.11" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.0" />
+    <PackageReference Include="Ocelot" Version="24.1.0" />
+    <PackageReference Include="Serilog" Version="4.3.1" />
+  </ItemGroup>
+</Project>
+```
+
+### 3. 添加 Ocelot 配置文件
+
+在 `ocelot.Development.json` 中定义路由规则，将上游请求路由到下游微服务：
+
+```json
+{
+  "Routes": [
+    {
+      "DownstreamPathTemplate": "/api/v1/Catalog/GetAllProducts",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [{ "Host": "host.docker.internal", "Port": 8000 }],
+      "UpstreamPathTemplate": "/Catalog/GetAllProducts",
+      "UpstreamHttpMethod": ["GET"],
+      "AddHeadersToRequest": { "x-correlation-id": "{X-Correlation-Id}" }
+    },
+    {
+      "DownstreamPathTemplate": "/api/v1/Catalog/{id}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [{ "Host": "host.docker.internal", "Port": 8000 }],
+      "UpstreamPathTemplate": "/Catalog/{id}",
+      "UpstreamHttpMethod": ["GET", "DELETE"],
+      "AddHeadersToRequest": { "x-correlation-id": "{X-Correlation-Id}" }
+    },
+    {
+      "DownstreamPathTemplate": "/api/v1/Basket/Checkout",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [{ "Host": "host.docker.internal", "Port": 8000 }],
+      "UpstreamPathTemplate": "/Basket/Checkout",
+      "UpstreamHttpMethod": ["POST"],
+      "AddHeadersToRequest": { "x-correlation-id": "{X-Correlation-Id}" },
+      "AuthenticationOptions": { "AuthenticationProviderKey": "Bearer" }
+    },
+    {
+      "DownstreamPathTemplate": "/api/v1/Order",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [{ "Host": "host.docker.internal", "Port": 8000 }],
+      "UpstreamPathTemplate": "/Order",
+      "UpstreamHttpMethod": ["POST", "PUT"],
+      "AddHeadersToRequest": { "x-correlation-id": "{X-Correlation-Id}" }
+    },
+    {
+      "DownstreamPathTemplate": "/api/auth/{everything}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [{ "Host": "host.docker.internal", "Port": 8000 }],
+      "UpstreamPathTemplate": "/identity/api/auth/{everything}",
+      "UpstreamHttpMethod": ["GET", "POST"],
+      "AddHeadersToRequest": { "x-correlation-id": "{X-Correlation-Id}" }
+    }
+  ],
+  "GlobalConfiguration": {
+    "BaseUrl": "http://localhost:8010"
+  }
+}
+```
+
+**路由配置说明：**
+
+| 配置项 | 说明 |
+|--------|------|
+| UpstreamPathTemplate | 客户端请求的路径模板 |
+| DownstreamPathTemplate | 下游微服务的实际路径 |
+| DownstreamHostAndPorts | 下游服务的地址和端口 |
+| UpstreamHttpMethod | 允许的 HTTP 方法 |
+| AddHeadersToRequest | 自动添加的请求头（如关联 ID） |
+| AuthenticationOptions | 需要认证的选项 |
+
+### 4. 添加应用配置
+
+在 `appsettings.json` 中配置 JWT 和 CORS：
+
+```json
+{
+  "Jwt": {
+    "Key": "learn-dotnet-ecommerce-microservices",
+    "Issuer": "learn-dotnet-ecommerce-microservices",
+    "Audience": "learn-dotnet-ecommerce-microservices",
+    "DurationInMinutes": 60
+  },
+  "Cors": {
+    "AllowedOrigins": ["http://localhost:4200"]
+  }
+}
+```
+
+### 5. 配置 Program.cs
+
+在 `Program.cs` 中整合 Ocelot、JWT 认证和中间件：
+
+```csharp
+using System.Text;
+using ApiGateway.Middleware;
+using Microsoft.IdentityModel.Tokens;
+using Ocelot.DependencyInjection;
+using Ocelot.Middleware;
+
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddControllers();
+builder.Services.AddOpenApi();
+
+// 加载 Ocelot 配置
+var env = builder.Environment.EnvironmentName;
+builder.Configuration
+    .SetBasePath(Directory.GetCurrentDirectory())
+    .AddJsonFile($"ocelot.{env}.json", optional: false, reloadOnChange: true)
+    .AddEnvironmentVariables();
+
+var jwtSettings = builder.Configuration.GetSection("Jwt");
+var key = jwtSettings.GetSection("Key").Value;
+var issuer = jwtSettings.GetSection("Issuer").Value;
+var audience = jwtSettings.GetSection("Audience").Value;
+
+var allowedOrigins = builder.Configuration.GetSection("AllowedOrigins").Get<string[]>();
+
+// 配置 CORS
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowedOrigins", policy =>
+    {
+        policy.WithOrigins(allowedOrigins ?? Array.Empty<string>())
+            .AllowAnyHeader()
+            .AllowAnyMethod();
+    });
+});
+
+// 配置 JWT 认证
+builder.Services.AddAuthentication("Bearer")
+    .AddJwtBearer("Bearer", options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer = issuer,
+            ValidAudience = audience,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key))
+        };
+    });
+
+builder.Services.AddAuthorization();
+builder.Services.AddOcelot(builder.Configuration);
+
+var app = builder.Build();
+
+if (app.Environment.IsDevelopment())
+{
+    app.MapOpenApi();
+}
+
+app.UseRouting();
+app.UseCors("AllowedOrigins");
+app.UseMiddleware<CorrelationIdMiddleware>();
+app.UseAuthentication();
+app.UseAuthorization();
+app.MapControllers();
+
+app.MapGet("/", () => "Hello World!");
+await app.UseOcelot();
+app.Run();
+```
+
+### 6. 添加关联 ID 中间件
+
+创建 `Middleware/CorrelationIdMiddleware.cs`，用于在请求链路中传递关联 ID，便于日志追踪：
+
+```csharp
+using Serilog.Context;
+
+namespace ApiGateway.Middleware;
+
+public class CorrelationIdMiddleware(RequestDelegate next, ILogger<CorrelationIdMiddleware> logger)
+{
+    private const string CorrelationIdHeader = "x-correlation-id";
+
+    public async Task Invoke(HttpContext context)
+    {
+        if (!context.Request.Headers.TryGetValue(CorrelationIdHeader, out var correlationId))
+        {
+            correlationId = Guid.NewGuid().ToString();
+        }
+
+        context.Request.Headers[CorrelationIdHeader] = correlationId;
+
+        using (LogContext.PushProperty("CorrelationId", correlationId))
+        {
+            logger.LogInformation("Correlation Id set: {CorrelationId}", correlationId);
+            await next(context);
+        }
+    }
+}
+```
+
+**作用：**
+
+| 功能 | 说明 |
+|------|------|
+| 请求追踪 | 为每个请求生成或提取唯一关联 ID |
+| 日志关联 | 通过 Serilog.Context 将关联 ID 附加到所有日志 |
+| 跨服务追踪 | 通过 Ocelot 的 AddHeadersToRequest 传递到下���服务 |
+
+### 7. 配置 Docker Compose
+
+**7.1 API Gateway Dockerfile：**
+
+```dockerfile
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS base
+USER $APP_UID
+WORKDIR /app
+EXPOSE 8080
+EXPOSE 8081
+
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+ARG BUILD_CONFIGURATION=Release
+WORKDIR /src
+COPY ["src/ApiGateway/ApiGateway/ApiGateway.csproj", "src/ApiGateway/ApiGateway/"]
+RUN dotnet restore "src/ApiGateway/ApiGateway/ApiGateway.csproj"
+COPY . .
+WORKDIR "/src/src/ApiGateway/ApiGateway"
+RUN dotnet build "./ApiGateway.csproj" -c $BUILD_CONFIGURATION -o /app/build
+
+FROM build AS publish
+ARG BUILD_CONFIGURATION=Release
+RUN dotnet publish "./ApiGateway.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false
+
+FROM base AS final
+WORKDIR /app
+COPY --from=publish /app/publish .
+ENTRYPOINT ["dotnet", "ApiGateway.dll"]
+```
+
+**7.2 更新 docker-compose.yaml：**
+
+```yaml
+services:
+  ocelot.apigateway:
+    image: ocelot.apigateway
+    build:
+      context: .
+      dockerfile: src/ApiGateway/ApiGateway/Dockerfile
+```
+
+**7.3 更新 docker-compose.override.yaml：**
+
+```yaml
+services:
+  ocelot.apigateway:
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - Jwt__Key=super_secure_secret_key1234567890@#*&!@%_
+      - Jwt__Issuer=learn-dotnet-ecommerce-microservices
+      - Jwt__Audience=learn-dotnet-ecommerce-microservices
+      - Jwt_DurationInMinutes=60
+    depends_on:
+      - identity.api
+      - catalog.api
+      - basket.api
+      - ordering.api
+      - payment.api
+      - discount.api
+    ports:
+      - "8010:8080"
+```
+
+### 8. 启动与验证
+
+**8.1 启动所有服务：**
+```bash
+docker-compose up -d
+```
+
+**8.2 通过网关访问微服务：**
+
+| 接口 | 网关路径 | 说明 |
+|------|----------|------|
+| 产品列表 | `GET http://localhost:8010/Catalog/GetAllProducts` | 路由到 Catalog API |
+| 单个产品 | `GET http://localhost:8010/Catalog/{id}` | 路由到 Catalog API |
+| 购物车 | `GET http://localhost:8010/Basket/{userName}` | 路由到 Basket API |
+| 结算 | `POST http://localhost:8010/Basket/Checkout` | 路由到 Basket API（需认证） |
+| 订单 | `GET http://localhost:8010/Order/{userName}` | 路由到 Ordering API |
+| 创建订单 | `POST http://localhost:8010/Order` | 路由到 Ordering API |
+| 认证 | `POST http://localhost:8010/identity/api/auth/register` | 路由到 Identity API |
+
+**8.3 请求链路示例：**
+
+```
+客户端请求
+    ↓
+http://localhost:8010/Catalog/GetAllProducts
+    ↓
+API Gateway (Ocelot)
+    ├─ 添加 x-correlation-id 请求头
+    ├─ 验证 JWT Token（如需认证）
+    └─ 路由到下游服务
+    ↓
+http://host.docker.internal:8000/api/v1/Catalog/GetAllProducts
+    ↓
+Catalog API 处理并返回响应
+```
+
+### 9. 网关架构
+
+```
+┌──────────┐       ┌──────────────────┐       ┌──────────────┐
+│  Client   │──────▶│  API Gateway     │──────▶│  Catalog API │
+│           │       │  (Port 8010)     │       │  (Port 8000) │
+└──────────┘       │                  │       └──────────────┘
+                   │  - 路由分发      │
+┌──────────┐       │  - JWT 认证      │       ┌──────────────┐
+│  Client   │──────▶│  - CORS          │──────▶│  Basket API  │
+│           │       │  - 关联 ID       │       │  (Port 8000) │
+└──────────┘       │  - 请求转换      │       └──────────────┘
+                   └──────────────────┘
+                           │
+                   ┌───────┴──────────────┐
+                   ▼                      ▼
+            ┌──────────────┐      ┌──────────────┐
+            │ Ordering API │      │ Identity API │
+            └──────────────┘      └──────────────┘
+```
+
+### 10. 优势总结
+
+| 特性 | 说明 |
+|------|------|
+| 统一入口 | 所有客户端请求通过单一端口（8010）访问 |
+| 路由转发 | Ocelot 自动将请求路由到对应微服务 |
+| JWT 验证 | 网关层统一验证 Token，减轻微服务负担 |
+| 跨域支持 | 集中配置 CORS，避免在每个服务中重复配置 |
+| 关联追踪 | 通过 CorrelationIdMiddleware 实现请求链路追踪 |
+| 请求转换 | 自动转换路径格式（如 /Catalog → /api/v1/Catalog） |
+| 动态配置 | Ocelot 支持热重载配置，无需重启服务 |
+
