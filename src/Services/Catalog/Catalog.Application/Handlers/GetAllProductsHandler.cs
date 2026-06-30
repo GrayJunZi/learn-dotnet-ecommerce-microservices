@@ -1,4 +1,4 @@
-﻿using Catalog.Application.Mappers;
+using Catalog.Application.Mappers;
 using Catalog.Application.Queries;
 using Catalog.Application.Responses;
 using Catalog.Core.Repositories;
@@ -17,7 +17,7 @@ public class GetAllProductsHandler(
         CancellationToken cancellationToken)
     {
         var productList = await productRepository.GetProductsAsync(request.CatalogSpecParams);
-        logger.LogInformation("Fetched {ProductCount} products}", productList.Count);
+        logger.LogInformation("Fetched {ProductCount} products", productList.Count);
         return productList.ToResponse();
     }
 }

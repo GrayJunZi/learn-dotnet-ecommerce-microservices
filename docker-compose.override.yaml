@@ -41,11 +41,12 @@ services:
     volumes:
       - sqlserver_data:/var/opt/mssql
     healthcheck:
-      test: ["CMD-SHELL","/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P 'Password@123' -Q 'select 1'"]
+      test: ["CMD-SHELL","/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'Password@123' -C -Q 'select 1'"]
       interval: 10s
       timeout: 10s
-      retries: 3
-      
+      retries: 10
+      start_period: 30s
+
   identity.db:
     container_name: identity.db
     environment:
@@ -57,10 +58,11 @@ services:
     volumes:
       - identitydb_data:/var/opt/mssql
     healthcheck:
-      test: [ "CMD-SHELL","/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P 'Password@123' -Q 'select 1'" ]
+      test: [ "CMD-SHELL","/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'Password@123' -C -Q 'select 1'" ]
       interval: 10s
       timeout: 10s
-      retries: 3
+      retries: 10
+      start_period: 30s
   
   rabbitmq:
     container_name: rabbitmq
@@ -70,6 +72,7 @@ services:
       - "15672:15672"
       
   catalog.api:
+    container_name: catalog.api
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - DatabaseSettings__ConnectionString=mongodb://catalog.db:27017
@@ -81,10 +84,10 @@ services:
     depends_on:
       - catalog.db
     ports:
-      - "8010:8080"
-      - "8011:8081"
+      - "8000:8080"
         
   basket.api:
+    container_name: basket.api
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - CacheSettings__ConnectionString=basket.db:6379
@@ -96,9 +99,9 @@ services:
       - rabbitmq
     ports:
       - "8020:8080"
-      - "8021:8081"
-  
+
   discount.api:
+    container_name: discount.api
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - DatabaseSettings__ConnectionString=Server=discount.db;Port=5432;Database=DiscountDb;User Id=admin;Password=Password@123
@@ -107,12 +110,12 @@ services:
       - discount.db
     ports:
       - "8030:8080"
-      - "8031:8081"
 
   ordering.api:
+    container_name: ordering.api
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
-      - DatabaseSettings__ConnectionString=Server=ordering.db;Port=1433;Database=OrderingDb;User Id=sa;Password=Password@123
+      - DatabaseSettings__ConnectionString=Server=ordering.db,1433;Database=OrderingDb;User Id=sa;Password=Password@123;TrustServerCertificate=True
       - EventBusSettings__HostAddress=amqp://guest:guest@rabbitmq:5672/
       - ElasticConfiguration__Uri=http://elasticsearch:9200
     depends_on:
@@ -120,39 +123,41 @@ services:
       - rabbitmq
     ports:
       - "8040:8080"
-      - "8041:8081"
-        
+
   payment.api:
+    container_name: payment.api
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - EventBusSettings__HostAddress=amqp://guest:guest@rabbitmq:5672/
       - ElasticConfiguration__Uri=http://elasticsearch:9200
+    depends_on:
+      - rabbitmq
     ports:
       - "8050:8080"
-      - "8051:8081"
-  
+
   identity.api:
+    container_name: identity.api
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
-      - DatabaseSettings__ConnectionString=Server=identity.db;Port=1434;Database=IdentityDb;User Id=sa;Password=Password@123
-      - "Jwt__Key=super_secure_secret_key1234567890@#*&!@%_"
+      - ConnectionStrings__IdentityConnection=Server=identity.db,1433;Database=IdentityDb;User Id=sa;Password=Password@123;TrustServerCertificate=True
+      - Jwt__Key=super_secure_secret_key1234567890#@!
       - Jwt__Issuer=learn-dotnet-ecommerce-microservices
       - Jwt__Audience=learn-dotnet-ecommerce-microservices
-      - Jwt_DurationInMinutes=60
+      - Jwt__DurationInMinutes=60
       - ElasticConfiguration__Uri=http://elasticsearch:9200
     depends_on:
       - identity.db
     ports:
       - "8060:8080"
-      - "8061:8081"
-        
+
   ocelot.apigateway:
+    container_name: ocelot.apigateway
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
-      - "Jwt__Key=super_secure_secret_key1234567890@#*&!@%_"
+      - Jwt__Key=super_secure_secret_key1234567890#@!
       - Jwt__Issuer=learn-dotnet-ecommerce-microservices
       - Jwt__Audience=learn-dotnet-ecommerce-microservices
-      - Jwt_DurationInMinutes=60
+      - Jwt__DurationInMinutes=60
     depends_on:
       - identity.api
       - catalog.api

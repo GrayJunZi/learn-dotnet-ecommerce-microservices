@@ -1,12 +1,12 @@
-﻿{
+{
   "Routes": [
     {
       "DownstreamPathTemplate": "/api/v1/Catalog/GetAllProducts",
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [
         {
-          "Host": "host.docker.internal",
-          "Port": 8000
+          "Host": "catalog.api",
+          "Port": 8080
         }
       ],
       "UpstreamPathTemplate": "/Catalog/GetAllProducts",
@@ -22,8 +22,8 @@
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [
         {
-          "Host": "host.docker.internal",
-          "Port": 8000
+          "Host": "catalog.api",
+          "Port": 8080
         }
       ],
       "UpstreamPathTemplate": "/Catalog/{id}",
@@ -40,8 +40,8 @@
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [
         {
-          "Host": "host.docker.internal",
-          "Port": 8000
+          "Host": "catalog.api",
+          "Port": 8080
         }
       ],
       "UpstreamPathTemplate": "/Catalog/GetAllBrands",
@@ -57,8 +57,8 @@
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [
         {
-          "Host": "host.docker.internal",
-          "Port": 8000
+          "Host": "catalog.api",
+          "Port": 8080
         }
       ],
       "UpstreamPathTemplate": "/Catalog/GetAllTypes",
@@ -74,8 +74,8 @@
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [
         {
-          "Host": "host.docker.internal",
-          "Port": 8000
+          "Host": "catalog.api",
+          "Port": 8080
         }
       ],
       "UpstreamPathTemplate": "/Catalog/brand/{brand}",
@@ -87,12 +87,63 @@
       }
     },
     {
+      "DownstreamPathTemplate": "/api/v1/Catalog/productName/{productName}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "catalog.api",
+          "Port": 8080
+        }
+      ],
+      "UpstreamPathTemplate": "/Catalog/productName/{productName}",
+      "UpstreamHttpMethod": [
+        "GET"
+      ],
+      "AddHeadersToRequest": {
+        "x-correlation-id": "{X-Correlation-Id}"
+      }
+    },
+    {
+      "DownstreamPathTemplate": "/api/v1/Catalog",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "catalog.api",
+          "Port": 8080
+        }
+      ],
+      "UpstreamPathTemplate": "/Catalog",
+      "UpstreamHttpMethod": [
+        "POST"
+      ],
+      "AddHeadersToRequest": {
+        "x-correlation-id": "{X-Correlation-Id}"
+      }
+    },
+    {
+      "DownstreamPathTemplate": "/api/v1/Catalog/{id}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "catalog.api",
+          "Port": 8080
+        }
+      ],
+      "UpstreamPathTemplate": "/Catalog/{id}",
+      "UpstreamHttpMethod": [
+        "PUT"
+      ],
+      "AddHeadersToRequest": {
+        "x-correlation-id": "{X-Correlation-Id}"
+      }
+    },
+    {
       "DownstreamPathTemplate": "/api/v1/Basket/{userName}",
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [
         {
-          "Host": "host.docker.internal",
-          "Port": 8000
+          "Host": "basket.api",
+          "Port": 8080
         }
       ],
       "UpstreamPathTemplate": "/Basket/{userName}",
@@ -109,8 +160,8 @@
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [
         {
-          "Host": "host.docker.internal",
-          "Port": 8000
+          "Host": "basket.api",
+          "Port": 8080
         }
       ],
       "UpstreamPathTemplate": "/Basket",
@@ -126,8 +177,8 @@
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [
         {
-          "Host": "host.docker.internal",
-          "Port": 8000
+          "Host": "basket.api",
+          "Port": 8080
         }
       ],
       "UpstreamPathTemplate": "/Basket/Checkout",
@@ -146,8 +197,8 @@
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [
         {
-          "Host": "host.docker.internal",
-          "Port": 8000
+          "Host": "ordering.api",
+          "Port": 8080
         }
       ],
       "UpstreamPathTemplate": "/Order/{userName}",
@@ -163,8 +214,8 @@
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [
         {
-          "Host": "host.docker.internal",
-          "Port": 8000
+          "Host": "ordering.api",
+          "Port": 8080
         }
       ],
       "UpstreamPathTemplate": "/Order",
@@ -181,8 +232,8 @@
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [
         {
-          "Host": "host.docker.internal",
-          "Port": 8000
+          "Host": "ordering.api",
+          "Port": 8080
         }
       ],
       "UpstreamPathTemplate": "/Order/{id}",
@@ -194,12 +245,29 @@
       }
     },
     {
+      "DownstreamPathTemplate": "/api/auth",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "identity.api",
+          "Port": 8080
+        }
+      ],
+      "UpstreamPathTemplate": "/identity/api/auth",
+      "UpstreamHttpMethod": [
+        "POST"
+      ],
+      "AddHeadersToRequest": {
+        "x-correlation-id": "{X-Correlation-Id}"
+      }
+    },
+    {
       "DownstreamPathTemplate": "/api/auth/{everything}",
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [
         {
-          "Host": "host.docker.internal",
-          "Port": 8000
+          "Host": "identity.api",
+          "Port": 8080
         }
       ],
       "UpstreamPathTemplate": "/identity/api/auth/{everything}",

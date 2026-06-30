@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using EventBus.Messages.Events;
 using Ordering.Application.Constants;
 using Ordering.Application.DTOs;
@@ -139,7 +139,7 @@ public static class OrderMapper
                 order.CardExpiration,
                 order.Cvv,
                 order.PaymentMethod,
-                order.Status,
+                Status = order.Status.ToString(),
             }),
         };
 }

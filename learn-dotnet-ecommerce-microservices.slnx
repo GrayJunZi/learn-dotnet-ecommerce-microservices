@@ -12,6 +12,10 @@
   <Folder Name="/src/ApiGateway/">
     <Project Path="src/ApiGateway/ApiGateway/ApiGateway.csproj" />
   </Folder>
+  <Folder Name="/src/Aspire/">
+    <Project Path="src/Aspire/Aspire.AppHost/Aspire.AppHost.csproj" />
+    <Project Path="src/Aspire/Aspire.ServiceDefaults/Aspire.ServiceDefaults.csproj" />
+  </Folder>
   <Folder Name="/src/Infrastructure/">
     <Project Path="src/Infrastructure/EventBus.Messages/EventBus.Messages.csproj" />
     <Project Path="src/Infrastructure/Infrastructure.Logging/Infrastructure.Logging.csproj" />

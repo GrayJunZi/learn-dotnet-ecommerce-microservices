@@ -48,7 +48,7 @@ public class CatalogController(IMediator mediator, ILogger<CatalogController> lo
         return Ok(result);
     }
 
-    [HttpDelete]
+    [HttpDelete("{id}")]
     public async Task<IActionResult> DeleteProduct(string id)
     {
         var command = new DeleteProductByIdCommand(id);
@@ -84,7 +84,7 @@ public class CatalogController(IMediator mediator, ILogger<CatalogController> lo
         return Ok(result);
     }
 
-    [HttpGet("/brand/{brand}", Name = "GetProductsByBrandName")]
+    [HttpGet("brand/{brand}", Name = "GetProductsByBrandName")]
     public async Task<IActionResult> GetProductsByBrandName(string brand)
     {
         var query = new GetAllProductsByBrandQuery(brand);

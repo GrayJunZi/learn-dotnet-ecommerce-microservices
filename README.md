@@ -2565,13 +2565,13 @@ docker-compose up -d
 
 ## 八、实现 SAGA 模式
 
-### 8.1 介绍
+### 1. 介绍
 
 在分布式系统中，传统的两阶段提交（2PC）事务难以实现，因为涉及多个独立的微服务和数据库。SAGA 模式提供了一种替代方案，通过将长事务拆分为多个本地事务来实现最终一致性。
 
 本章节将实现基于 Outbox 模式的 SAGA 解决方案，确保消息传递的可靠性和事务一致性。
 
-### 8.2 SAGA 模式概述
+### 2. SAGA 模式概述
 
 **SAGA 模式的核心概念：**
 
@@ -2588,7 +2588,7 @@ docker-compose up -d
 
 本项目采用**编排式 + Outbox 模式**的组合方案。
 
-### 8.3 创建 Outbox Message 实体
+### 3. 创建 Outbox Message 实体
 
 Outbox 模式确保消息与数据库事务的原子性，避免消息丢失或重复发送。
 
@@ -2626,7 +2626,7 @@ public class OutboxMessage : EntityBase
 }
 ```
 
-### 8.4 创建 Order Status 订单状态
+### 4. 创建 Order Status 订单状态
 
 为订单实体添加状态字段，用于跟踪 SAGA 流程的执行状态。
 
@@ -2672,7 +2672,7 @@ public class Order : EntityBase
 }
 ```
 
-### 8.5 扩展 Order Context
+### 5. 扩展 Order Context
 
 在 OrderContext 中添加 OutboxMessage DbSet 并配置实体映射。
 
@@ -2709,7 +2709,7 @@ public class OrderContext : DbContext
 }
 ```
 
-### 8.6 扩展 Order Repository
+### 6. 扩展 Order Repository
 
 添加 OutboxMessage 相关的仓储方法。
 
@@ -2776,7 +2776,7 @@ public class OutboxRepository : IOutboxRepository
 }
 ```
 
-### 8.7 扩展 Order Creation Handler
+### 7. 扩展 Order Creation Handler
 
 修改 CreateOrderHandler，集成 Outbox 模式，将消息写入 Outbox 表而不是直接发布。
 
@@ -2858,7 +2858,7 @@ public class OrderCreatedEvent : IntegrationBaseEvent
 }
 ```
 
-### 8.8 创建 Outbox Message Dispatcher Service
+### 8. 创建 Outbox Message Dispatcher Service
 
 创建后台服务定期从 Outbox 表读取消息并发布到 RabbitMQ。
 
@@ -2946,7 +2946,7 @@ public class OutboxMessageDispatcher : BackgroundService
 }
 ```
 
-### 8.9 配置 Program.cs
+### 9. 配置 Program.cs
 
 在 Program.cs 中注册 Outbox Dispatcher 服务和相关依赖。
 
@@ -3001,7 +3001,7 @@ app.MapControllers();
 app.Run();
 ```
 
-### 8.10 EF Migration 和 Docker Build
+### 10. EF Migration 和 Docker Build
 
 **创建 OutboxMessage 表迁移：**
 
@@ -3058,7 +3058,7 @@ volumes:
 docker-compose up -d
 ```
 
-### 8.11 Outbox Table Demo
+### 11. Outbox Table Demo
 
 **OutboxMessages 表结构：**
 
@@ -3112,7 +3112,7 @@ SELECT * FROM OutboxMessages;
 
 Payment 微服务作为 SAGA 模式中的关键参与者，负责处理订单支付流程。它通过 RabbitMQ 监听订单创建事件，执行支付逻辑，并根据支付结果发布相应事件，驱动订单状态的流转。
 
-### 9.1 介绍
+### 1. 介绍
 
 Payment 微服务在整个 SAGA 流程中扮演"支付处理器"的角色：
 
@@ -3127,7 +3127,7 @@ Payment 微服务在整个 SAGA 流程中扮演"支付处理器"的角色：
 Basket → Checkout → OrderCreated (Outbox) → Payment → PaymentCompleted/PaymentFailed → Order Status Update
 ```
 
-### 9.2 创建 Payment 微服务
+### 2. 创建 Payment 微服务
 
 Payment 微服务是一个独立的最小化 ASP.NET Core Web API 项目，不需要传统分层结构，直接使用 MassTransit 消费者处理消息。
 
@@ -3148,7 +3148,7 @@ src/Services/Payment/
     └── appsettings.json
 ```
 
-### 9.3 安装 NuGet 包
+### 3. 安装 NuGet 包
 
 在 `Payment.API.csproj` 中添加必要的 NuGet 依赖：
 
@@ -3183,7 +3183,7 @@ src/Services/Payment/
 | EventBus.Messages | 共享事件消息契约 |
 | Microsoft.AspNetCore.OpenApi | OpenAPI 支持 |
 
-### 9.4 创建 Order Created Consumer
+### 4. 创建 Order Created Consumer
 
 `OrderCreatedConsumer` 是 Payment 微服务的核心组件，负责处理订单创建事件中的支付逻辑。
 
@@ -3246,7 +3246,7 @@ public class OrderCreatedConsumer(
 | 4 | 发布事件 | 根据结果发布 `PaymentCompletedEvent` 或 `PaymentFailedEvent` |
 | 5 | 传递 CorrelationId | 保持 SAGA 追踪链的完整性 |
 
-### 9.5 配置 Program.cs
+### 5. 配置 Program.cs
 
 在 Payment 微服务的 `Program.cs` 中配置 MassTransit 连接 RabbitMQ 并注册消费者。
 
@@ -3293,7 +3293,7 @@ app.Run();
 }
 ```
 
-### 9.6 Payment Completed Consumer（在 Ordering 微服务中）
+### 6. Payment Completed Consumer（在 Ordering 微服务中）
 
 Payment 微服务发布 `PaymentCompletedEvent` 后，Ordering 微服务需要监听并处理此事件，将订单状态更新为"已支付"。
 
@@ -3344,7 +3344,7 @@ public class PaymentCompletedConsumer(
 }
 ```
 
-### 9.7 Payment Failed Consumer（在 Ordering 微服务中）
+### 7. Payment Failed Consumer（在 Ordering 微服务中）
 
 Payment 微服务支付失败后发布 `PaymentFailedEvent`，Ordering 微服务监听此事件将订单状态更新为"失败"。
 
@@ -3396,7 +3396,7 @@ public class PaymentFailedConsumer(
 }
 ```
 
-### 9.8 配置 Ordering Program.cs
+### 8. 配置 Ordering Program.cs
 
 在 Ordering.API 的 `Program.cs` 中注册 Payment 相关的消费者，使 Ordering 微服务能够接收支付完成和支付失败事件。
 
@@ -3478,7 +3478,7 @@ public class EventBusConstants
 | payment-completed-queue | PaymentCompletedConsumer | Ordering | 接收支付完成事件 |
 | payment-failed-queue | PaymentFailedConsumer | Ordering | 接收支付失败事件 |
 
-### 9.9 Docker 配置
+### 9. Docker 配置
 
 **Payment.API Dockerfile：**
 
@@ -3528,7 +3528,7 @@ services:
       - "8004:8080"
 ```
 
-### 9.10 Pay 服务常见问题修复
+### 10. Pay 服务常见问题修复
 
 开发过程中需要注意以下问题：
 
@@ -3539,7 +3539,7 @@ services:
 | 订单状态未更新 | Ordering 未注册 Payment 消费者 | 在 Ordering Program.cs 中注册 `PaymentCompletedConsumer` 和 `PaymentFailedConsumer` |
 | 队列绑定失败 | 队列名称不匹配 | 确保 EventBusConstants 与 ReceiveEndpoint 名称一致 |
 
-### 9.11 SAGA Outbox Pattern Demo
+### 11. SAGA Outbox Pattern Demo
 
 **完整 SAGA 流程演示：**
 
@@ -3620,7 +3620,7 @@ Pending → Created → Paid (支付成功)
 
 Identity 微服务是一个独立的认证授权服务，基于 ASP.NET Core Identity 和 JWT（JSON Web Token）实现用户注册、登录和身份验证功能。它为整个电商微服务架构提供统一的身份管理和安全保障。
 
-### 10.1 创建 Identity 微服务解决方案
+### 1. 创建 Identity 微服务解决方案
 
 Identity 微服务采用最小化 ASP.NET Core Web API 项目结构，集成 ASP.NET Core Identity 和 SQL Server 数据库。
 
@@ -3650,7 +3650,7 @@ src/Services/Identity/
     └── appsettings.json
 ```
 
-### 10.2 创建 Identity Model 和 Context
+### 2. 创建 Identity Model 和 Context
 
 **ApplicationUser 模型：**
 
@@ -3721,7 +3721,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
 | Microsoft.AspNetCore.Authentication.JwtBearer | JWT 认证中间件 |
 | Swashbuckle.AspNetCore.Swagger* | Swagger/OpenAPI 文档支持 |
 
-### 10.3 配置 App Settings
+### 3. 配置 App Settings
 
 **appsettings.json：**
 
@@ -3749,7 +3749,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
 | Jwt:Audience | 受众名称 | JWT 的 aud 声明值 |
 | Jwt:DurationInMinutes | 60 | Token 有效期（分钟） |
 
-### 10.4 配置 Program.cs
+### 4. 配置 Program.cs
 
 ```csharp
 // Program.cs
@@ -3823,7 +3823,7 @@ AddDbContext → AddIdentity → AddAuthentication → AddAuthorization → AddC
               EF Core 配置     JWT Bearer 配置
 ```
 
-### 10.5 创建 DTOs
+### 5. 创建 DTOs
 
 **RegisterDto（注册请求）：**
 
@@ -3848,7 +3848,7 @@ public record LoginDto(
     string Password);
 ```
 
-### 10.6 创建 Authentication Controller
+### 6. 创建 Authentication Controller
 
 ```csharp
 // Controllers/AuthController.cs
@@ -3949,7 +3949,7 @@ public class AuthController(
 }
 ```
 
-### 10.7 修改 Launch Settings
+### 7. 修改 Launch Settings
 
 **launchSettings.json：**
 
@@ -3986,7 +3986,7 @@ public class AuthController(
 | HTTP | 5265 |
 | HTTPS | 7045 |
 
-### 10.8 Docker 配置
+### 8. Docker 配置
 
 **Dockerfile：**
 
@@ -4034,7 +4034,7 @@ services:
       - "5265:8080"
 ```
 
-### 10.9 应用数据库迁移
+### 9. 应用数据库迁移
 
 **创建迁移命令：**
 
@@ -4061,7 +4061,7 @@ dotnet ef database update --project . --startup-project .
 | AspNetUserLogins | 用户登录信息 |
 | AspNetUserTokens | 用户令牌 |
 
-### 10.10 JWT Demo
+### 10. JWT Demo
 
 **完整认证流程演示：**
 
@@ -4488,7 +4488,7 @@ http://localhost:5601
 | 环境隔离 | 通过 DataStream 区分不同环境和应用 |
 | 可扩展性 | 可以轻松添加更多微服务和日志源 |
 
-# 十二、实现 API 网关
+## 十二、实现 API 网关
 
 ### 1. 创建 API Gateway 项目
 
@@ -4872,3 +4872,1463 @@ Catalog API 处理并返回响应
 | 请求转换 | 自动转换路径格式（如 /Catalog → /api/v1/Catalog） |
 | 动态配置 | Ocelot 支持热重载配置，无需重启服务 |
 
+## 十三、实现 Aspire
+
+### 1. 创建 Aspire 项目
+
+安装 Aspire 模板并创建 AppHost 和 ServiceDefaults 项目：
+
+```bash
+dotnet new install Aspire.ProjectTemplates
+dotnet new aspire-apphost -n Aspire.AppHost
+dotnet new aspire-servicedefaults -n Aspire.ServiceDefaults
+```
+
+**创建的项目说明：**
+
+| 项目 | 用途 | 端口 |
+|------|------|------|
+| Aspire.AppHost | 编排中心，管理所有微服务和基础设施资源 | 19888 (Dashboard) |
+| Aspire.ServiceDefaults | 共享项目，为微服务提供可观测性配置 | 无独立端口 |
+
+### 2. 安装项目引用
+
+将所有微服务项目添加到 Aspire.AppHost 中：
+
+```bash
+dotnet add Aspire.AppHost reference ApiGateway
+dotnet add Aspire.AppHost reference Basket.API
+dotnet add Aspire.AppHost reference Catalog.API
+dotnet add Aspire.AppHost reference Discount.API
+dotnet add Aspire.AppHost reference Identity.API
+dotnet add Aspire.AppHost reference Ordering.API
+dotnet add Aspire.AppHost reference Payment.API
+```
+
+**项目引用关系：**
+
+| 被引用的项目 | 在 Aspire 中的角色 | 说明 |
+|-------------|-------------------|------|
+| ApiGateway | 上游服务 | 统一入口，路由到所有微服务 |
+| Catalog.API | 微服务 | 产品目录服务 |
+| Basket.API | 微服务 | 购物车服务 |
+| Ordering.API | 微服务 | 订单服务 |
+| Discount.API | 微服务 | 折扣服务 |
+| Identity.API | 微服务 | 身份认证服务 |
+| Payment.API | 微服务 | 支付服务 |
+
+### 3. 安装基础设施依赖包
+
+安装 Aspire 托管的各种基础设施包：
+
+```bash
+dotnet add package Aspire.Hosting.MongoDB
+dotnet add package Aspire.Hosting.Redis
+dotnet add package Aspire.Hosting.PostgreSQL
+dotnet add package Aspire.Hosting.SqlServer
+dotnet add package Aspire.Hosting.RabbitMQ
+```
+
+**基础设施包对照表：**
+
+| NuGet 包 | 基础设施 | 被哪个微服务使用 | 端口 |
+|----------|----------|-----------------|------|
+| Aspire.Hosting.MongoDB | MongoDB | Catalog.API | 27017 |
+| Aspire.Hosting.Redis | Redis | Basket.API | 6379 |
+| Aspire.Hosting.PostgreSQL | PostgreSQL | Discount.API | 5432 |
+| Aspire.Hosting.SqlServer | SQL Server | Ordering.API, Identity.API | 1433 |
+| Aspire.Hosting.RabbitMQ | RabbitMQ | Basket, Ordering, Payment | 5672 / 15672 |
+```
+
+### 4. 定义 App Host - 第一部分
+
+创建 `Aspire.AppHost` 项目，作为 Orchestration 中心管理所有微服务和基础设施。
+
+**项目结构：**
+```
+src/Aspire/
+├── Aspire.AppHost/
+│   ├── Aspire.AppHost.csproj
+│   ├── AppHost.cs
+│   ├── aspire.config.json
+│   ├── appsettings.json
+│   └── appsettings.Development.json
+└── Aspire.ServiceDefaults/
+    ├── Aspire.ServiceDefaults.csproj
+    └── Extensions.cs
+```
+
+**AppHost.csproj：**
+```xml
+<Project Sdk="Aspire.AppHost.Sdk/13.4.6">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UserSecretsId>b56c3360-eb25-4940-aadb-5d54e48c6ab2</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.MongoDB" Version="13.4.6" />
+    <PackageReference Include="Aspire.Hosting.PostgreSQL" Version="13.4.6" />
+    <PackageReference Include="Aspire.Hosting.RabbitMQ" Version="13.4.6" />
+    <PackageReference Include="Aspire.Hosting.Redis" Version="13.4.6" />
+    <PackageReference Include="Aspire.Hosting.SqlServer" Version="13.4.6" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\ApiGateway\ApiGateway\ApiGateway.csproj" />
+    <ProjectReference Include="..\..\Services\Basket\Basket.API\Basket.API.csproj" />
+    <ProjectReference Include="..\..\Services\Catalog\Catalog.API\Catalog.API.csproj" />
+    <ProjectReference Include="..\..\Services\Discount\Discount.API\Discount.API.csproj" />
+    <ProjectReference Include="..\..\Services\Identity\Identity.API\Identity.API.csproj" />
+    <ProjectReference Include="..\..\Services\Ordering\Ordering.API\Ordering.API.csproj" />
+    <ProjectReference Include="..\..\Services\Payment\Payment.API\Payment.API.csproj" />
+  </ItemGroup>
+
+</Project>
+```
+
+### 5. 添加所需的项目引用
+
+将所有微服务项目添加到 AppHost 中：
+
+| 项目引用 | 说明 |
+|----------|------|
+| ApiGateway | API 网关 |
+| Basket.API | 购物车服务 |
+| Catalog.API | 产品目录服务 |
+| Discount.API | 折扣服务 |
+| Identity.API | 身份认证服务 |
+| Ordering.API | 订单服务 |
+| Payment.API | 支付服务 |
+
+### 6. 扩展 App Host 功能
+
+**6.1 定义基础设施资源：**
+
+```csharp
+// MongoDB - Catalog
+var mongo = builder.AddMongoDB("catalogdb").WithDataVolume();
+
+// Redis - Basket
+var redis = builder.AddRedis("basketdb");
+
+// Postgres - Discount
+var postgres = builder.AddPostgres("discountdb").WithDataVolume();
+var discountDb = postgres.AddDatabase("discount-db");
+
+// Sqlserver - Ordering + Identity
+var sqlserver = builder.AddSqlServer("sqlserver").WithDataVolume();
+var orderingDb = sqlserver.AddDatabase("OrderingDb");
+var identityDb = sqlserver.AddDatabase("IdentityDb");
+
+// RabbitMQ
+var rabbitmq = builder.AddRabbitMQ("rabbitmq");
+```
+
+**6.2 注册微服务并连接基础设施：**
+
+```csharp
+// APIs
+var catalog = builder.AddProject<Projects.Catalog_API>("catalog")
+    .WithReference(mongo);
+
+var basket = builder.AddProject<Projects.Basket_API>("basket")
+    .WithReference(redis)
+    .WithReference(rabbitmq);
+
+var ordering = builder.AddProject<Projects.Ordering_API>("ordering")
+    .WithReference(orderingDb)
+    .WithReference(rabbitmq);
+
+var discount = builder.AddProject<Projects.Discount_API>("discount")
+    .WithReference(discountDb);
+
+var payment = builder.AddProject<Projects.Payment_API>("payment")
+    .WithReference(rabbitmq);
+
+var identity = builder.AddProject<Projects.Identity_API>("identity")
+    .WithReference(identityDb)
+    .WithEnvironment("Jwt__Key","super_secure_secret_key1234567890#@!")
+    .WithEnvironment("Jwt__Issuer","learn-dotnet-ecommerce-microservices")
+    .WithEnvironment("Jwt__Audience","learn-dotnet-ecommerce-microservices")
+    .WithEnvironment("Jwt__DurationInMinutes","60");
+```
+
+**5.3 配置 API Gateway 路由：**
+
+```csharp
+// API Gateway
+var gateway = builder.AddProject<Projects.ApiGateway>("apigateway");
+gateway
+    .WithReference(catalog)
+    .WithReference(basket)
+    .WithReference(ordering)
+    .WithReference(discount)
+    .WithReference(payment);
+
+builder.Build().Run();
+```
+
+**WithReference 说明：**
+
+| 服务 | 引用资源 | 连接字符串注入方式 |
+|------|----------|-------------------|
+| Catalog | MongoDB | `DatabaseSettings__ConnectionString` |
+| Basket | Redis + RabbitMQ | `CacheSettings__ConnectionString` + `EventBusSettings__HostAddress` |
+| Ordering | SQL Server + RabbitMQ | `DatabaseSettings__ConnectionString` + `EventBusSettings__HostAddress` |
+| Discount | PostgreSQL | `DatabaseSettings__ConnectionString` |
+| Payment | RabbitMQ | `EventBusSettings__HostAddress` |
+| Identity | SQL Server | `DatabaseSettings__ConnectionString` |
+
+### 7. 创建 ServiceDefaults 项目
+
+`Aspire.ServiceDefaults` 是一个共享项目，为每个微服务提供通用的可观测性配置：
+
+**Aspire.ServiceDefaults.csproj：**
+```xml
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsAspireSharedProject>true</IsAspireSharedProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+
+    <PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="10.6.0" />
+    <PackageReference Include="Microsoft.Extensions.ServiceDiscovery" Version="10.6.0" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.15.3" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.15.3" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.15.2" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.15.1" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.15.1" />
+  </ItemGroup>
+</Project>
+```
+
+**核心功能模块：**
+
+| 功能 | 方法 | 说明 |
+|------|------|------|
+| 开放遥测 | `ConfigureOpenTelemetry()` | 配置 Metrics 和 Tracing |
+| 健康检查 | `AddDefaultHealthChecks()` | 添加自检查询 |
+| 服务发现 | `AddServiceDiscovery()` | 支持动态服务发现 |
+| HTTP 韧性 | `AddStandardResilienceHandler()` | 自动重试和熔断 |
+| 端点映射 | `MapDefaultEndpoints()` | 暴露健康检查和存活端点 |
+
+**Metrics 采集：**
+- ASP.NET Core 请求指标
+- HTTP 客户端调用指标
+- 运行时资源指标（CPU、内存等）
+
+**Tracing 配置：**
+- 排除健康检查端点的追踪
+- HTTP 客户端追踪
+- 应用名称作为 Trace Source
+
+### 8. 解决 Aspire 异常问题
+
+**7.1 常见问题：连接字符串格式不匹配**
+
+Aspire 自动生成的连接字符串可能与微服务期望的格式不同。例如：
+
+| 来源 | 格式 |
+|------|------|
+| Aspire 自动生成 | `tcp:sqlserver:1433`（服务发现格式） |
+| 微服务期望 | `Server=sqlserver;Port=1433;Database=OrderingDb;...` |
+
+**8.2 解决方案：自定义连接字符串**
+
+在 `AppHost.cs` 中通过 `.WithEnvironment()` 覆盖连接字符串：
+
+```csharp
+var identity = builder.AddProject<Projects.Identity_API>("identity")
+    .WithReference(identityDb)
+    .WithEnvironment("DatabaseSettings__ConnectionString", 
+        "Server=identity.db;Port=1434;Database=IdentityDb;User Id=sa;Password=Password@123");
+```
+
+### 9. 连接字符串问题详解
+
+**9.1 问题描述：**
+
+Aspire 默认使用服务发现机制，生成的连接字符串格式为：
+```
+tcp:<service-name>:<port>
+```
+
+但微服务的 `appsettings.json` 中期望的是传统格式：
+```
+Server=<host>;Port=<port>;Database=<name>;User Id=<user>;Password=<pwd>
+```
+
+**9.2 影响范围：**
+
+| 服务 | 数据库 | 问题表现 |
+|------|--------|----------|
+| Catalog.API | MongoDB | MongoDB 驱动可能无法解析服务发现格式 |
+| Ordering.API | SQL Server | EF Core 无法识别 `tcp:` 协议 |
+| Identity.API | SQL Server | 同上 |
+| Discount.API | PostgreSQL | Npgsql 连接失败 |
+
+### 10. 修复连接字符串问题
+
+**方案一：在 AppHost 中显式设置连接字符串**
+
+```csharp
+var catalog = builder.AddProject<Projects.Catalog_API>("catalog")
+    .WithReference(mongo)
+    .WithEnvironment("DatabaseSettings__ConnectionString", 
+        "mongodb://localhost:27017");
+```
+
+**方案二：使用 Aspire 的资源命名约定**
+
+确保微服务中的连接字符串键名与 Aspire 注入的键名一致：
+
+| 微服务 | 配置键 | Aspire 注入值 |
+|--------|--------|---------------|
+| Catalog | `DatabaseSettings__ConnectionString` | MongoDB 连接字符串 |
+| Basket | `CacheSettings__ConnectionString` | Redis 连接字符串 |
+| Ordering | `DatabaseSettings__ConnectionString` | SQL Server 连接字符串 |
+| Discount | `DatabaseSettings__ConnectionString` | PostgreSQL 连接字符串 |
+| Identity | `DatabaseSettings__ConnectionString` | SQL Server 连接字符串 |
+
+**方案三：更新微服务的 appsettings.json**
+
+确保连接字符串占位符与 Aspire 的环境变量注入格式匹配：
+
+```json
+{
+  "DatabaseSettings": {
+    "ConnectionString": "Server=localhost;Port=1433;Database=OrderingDb;User Id=sa;Password=Password@123"
+  }
+}
+```
+
+Aspire 会将 `DatabaseSettings__ConnectionString` 环境变量覆盖此值。
+
+### 11. 启动与验证 Aspire
+
+**10.1 启动 Aspire Dashboard：**
+```bash
+cd src/Aspire/Aspire.AppHost
+dotnet run
+```
+
+**11.2 访问 Aspire Dashboard：**
+```
+http://localhost:19888
+```
+
+**10.3 Dashboard 功能：**
+
+| 功能 | 说明 |
+|------|------|
+| 资源视图 | 查看所有微服务和基础设施的状态 |
+| 分布式追踪 | 查看请求在各服务间的流转 |
+| 指标监控 | 实时查看 Metrics 数据 |
+| 日志聚合 | 集中查看各服务的日志 |
+| 健康检查 | 监控各服务的健康状态 |
+
+**11.4 架构概览：**
+
+```
+┌─────────────────────────────────────────────────┐
+│              Aspire Dashboard                    │
+│              (Port 19888)                        │
+│                                                  │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐      │
+│  │ Catalog  │  │ Basket   │  │ Ordering │      │
+│  │  API     │  │  API     │  │  API     │      │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘      │
+│       │             │             │             │
+│  ┌────┴─────────────┴─────────────┴─────┐      │
+│  │         Service Discovery             │      │
+│  └──────────────────┬────────────────────┘      │
+│                     │                           │
+│  ┌──────────────────┴────────────────────┐      │
+│  │         Resilience & Telemetry        │      │
+│  └──────────────────┬────────────────────┘      │
+└─────────────────────┬───────────────────────────┘
+                      │
+        ┌─────────────┼─────────────┐
+        ▼             ▼             ▼
+   ┌────────┐   ┌────────┐   ┌────────┐
+   │MongoDB │   │ Redis  │   │SQL Server│
+   └────────┘   └────────┘   └────────┘
+```
+
+### 12. Aspire 优势总结
+
+| 特性 | 说明 |
+|------|------|
+| 本地开发体验 | 一条命令启动所有服务和基础设施 |
+| 服务发现 | 自动解析服务地址，无需硬编码 |
+| 可观测性 | 内置 OpenTelemetry 集成，自动收集 Traces/Metrics/Logs |
+| 韧性处理 | 自动添加重试、熔断等 HTTP 韧性策略 |
+| 资源编排 | 声明式定义基础设施依赖关系 |
+| Dashboard | 可视化监控所有服务和资源 |
+| 环境变量注入 | 自动将连接字符串注入到微服务 |
+| 开发效率 | 减少本地开发环境的配置复杂度 |
+
+---
+
+## 十四、系统架构与接口文档
+
+### 1. 系统架构图
+
+#### 1.1 整体架构
+
+```
+                            ┌────────────────────────────┐
+                            │       客户端 / 前端        │
+                            │   (Angular 21 / Postman)   │
+                            └─────────────┬──────────────┘
+                                          │ HTTP (REST)
+                                          ▼
+                            ┌────────────────────────────┐
+                            │   API Gateway (Ocelot)    │
+                            │       Port: 8010           │
+                            │  - 路由转发                │
+                            │  - JWT 鉴权                │
+                            │  - 请求聚合                │
+                            └─────────────┬──────────────┘
+                                          │
+        ┌─────────────────┬───────────────┼────────────────┬─────────────────┐
+        ▼                 ▼               ▼                ▼                 ▼
+┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
+│ Catalog.API  │  │ Basket.API  │  │ Ordering.API │  │ Payment.API  │  │ Identity.API │
+│   Port 8000  │  │   Port 8020 │  │  Port 8040   │  │  Port 8050   │  │  Port 8060   │
+│              │  │              │  │              │  │              │  │              │
+│ MongoDB      │  │ Redis        │  │ SQL Server   │  │ (无状态)     │  │ SQL Server   │
+│ Products/    │  │ ShoppingCarts│  │ Orders/      │  │ 消费事件     │  │ Users        │
+│ Brands/Types │  │              │  │ OutboxMsg    │  │              │  │              │
+└──────────────┘  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  └──────────────┘
+                         │ gRPC            │                 │
+                         ▼                 │                 │
+                  ┌──────────────┐         │                 │
+                  │ Discount.API│         │                 │
+                  │  Port 8030  │         │                 │
+                  │ PostgreSQL  │         │                 │
+                  │  Coupons    │         │                 │
+                  └──────────────┘         │                 │
+                                           │                 │
+                                           ▼                 ▼
+                                   ┌────────────────────────────┐
+                                   │   RabbitMQ (Event Bus)     │
+                                   │   Port: 5672 / 15672       │
+                                   │                            │
+                                   │  Queues:                   │
+                                   │  - basket-checkout-queue   │
+                                   │  - order-created-queue     │
+                                   └────────────────────────────┘
+                                           ▲
+                                   ┌────────────────────────────┐
+                                   │     ELK 日志栈            │
+                                   │  Elasticsearch: 9200       │
+                                   │  Kibana: 5601             │
+                                   │  Serilog 集中日志         │
+                                   └────────────────────────────┘
+```
+
+#### 1.2 服务职责一览
+
+| 服务 | 端口 | 数据库 | 职责 | 通信方式 |
+|------|------|--------|------|----------|
+| ocelot.apigateway | 8010 | - | 统一入口、路由、鉴权 | HTTP |
+| catalog.api | 8000 | MongoDB | 商品/品牌/类型管理 | HTTP |
+| basket.api | 8020 | Redis | 购物车管理 | HTTP + gRPC |
+| discount.api | 8030 | PostgreSQL | 折扣券管理（gRPC） | gRPC |
+| ordering.api | 8040 | SQL Server | 订单管理 + Outbox | HTTP + RabbitMQ |
+| payment.api | 8050 | - | 支付处理（事件消费） | RabbitMQ |
+| identity.api | 8060 | SQL Server | 用户注册登录、JWT 颁发 | HTTP |
+
+#### 1.3 数据流向
+
+```
+[客户端] ──HTTP──> [Ocelot Gateway] ──路由──> [各微服务]
+                                                  │
+                                                  ├──[同步]──> [数据库]
+                                                  │
+                                                  ├──[同步 gRPC]──> [Basket -> Discount]
+                                                  │
+                                                  └──[异步事件]──> [RabbitMQ] ──> [其他服务]
+                                                                                       │
+                                                                                       └──[Serilog]──> [Elasticsearch]
+```
+
+---
+
+### 2. 业务流程图
+
+#### 2.1 完整电商购物流程
+
+```
+┌──────────┐    1. 注册/登录      ┌──────────────┐    颁发 JWT     ┌──────────┐
+│          │ ───────────────────> │ Identity.API │ <─────────────  │          │
+│          │ <─────────────────── │              │                 │          │
+│          │     2. 携带 JWT      └──────────────┘                 │          │
+│          │ ─────────────────────────────────────────────────────> │          │
+│          │    3. 浏览商品         ┌──────────────┐                 │          │
+│          │ ───────────────────>  │ Catalog.API  │ <── MongoDB     │          │
+│          │ <───────────────────  │              │                 │          │
+│          │    4. 加入购物车       ┌──────────────┐                 │          │
+│          │ ───────────────────> │  Basket.API  │ <── Redis        │   客户端  │
+│          │                       │      │       │                 │          │
+│          │                       │      │ gRPC  │                 │          │
+│          │                       │      ▼       │                 │          │
+│          │                       │ Discount.API │ <── PostgreSQL  │          │
+│          │                       │ (获取折扣)   │                 │          │
+│          │ <───────────────────  │              │                 │          │
+│  用户   │    5. 结账 (Checkout)                                  │          │
+│          │ ──Bearer JWT────────> │  Basket.API  │                 │          │
+│          │                       └──────┬───────┘                 │          │
+│          │                              │                         │          │
+│          │                              │ 发布事件                 │          │
+│          │                              ▼                         │          │
+│          │                       ┌──────────────┐                 │          │
+│          │                       │   RabbitMQ   │                 │          │
+│          │                       │ BasketCheckoutEvent            │          │
+│          │                       └──────┬───────┘                 │          │
+│          │                              │                         │          │
+│          │                              ▼ 消费事件                │          │
+│          │                       ┌──────────────┐                 │          │
+│          │                       │ Ordering.API │ <── SQL Server  │          │
+│          │                       │ (创建订单)   │   (写入Outbox)  │          │
+│          │                       └──────┬───────┘                 │          │
+│          │                              │                         │          │
+│          │                              │ 发布 OrderCreatedEvent  │          │
+│          │                              ▼                         │          │
+│          │                       ┌──────────────┐                 │          │
+│          │                       │   RabbitMQ   │                 │          │
+│          │                       │ order-created-queue           │          │
+│          │                       └──────┬───────┘                 │          │
+│          │                              │                         │          │
+│          │                              ▼ 消费事件                │          │
+│          │                       ┌──────────────┐                 │          │
+│          │                       │ Payment.API  │                 │          │
+│          │                       │ (处理支付)   │                 │          │
+│          │                       └──────────────┘                 │          │
+└──────────┘                                                       └──────────┘
+```
+
+#### 2.2 事件驱动流转（Saga 协调）
+
+```
+[Basket.API]                 [RabbitMQ]                 [Ordering.API]              [RabbitMQ]              [Payment.API]
+     │                            │                            │                          │                          │
+     │ 1. POST /Basket/Checkout  │                            │                          │                          │
+     │ (Bearer JWT)               │                            │                          │                          │
+     ├───────────────────────────>│                            │                          │                          │
+     │                            │                            │                          │                          │
+     │ 2. 发布 BasketCheckoutEvent                            │                          │                          │
+     ├───────────────────────────>│                            │                          │                          │
+     │                            │                            │                          │                          │
+     │                            │ 3. 消费事件                │                          │                          │
+     │                            ├───────────────────────────>│                          │                          │
+     │                            │                            │ 4. FluentValidation 校验 │                          │
+     │                            │                            │ (信用卡、邮箱等)          │                          │
+     │                            │                            │                          │                          │
+     │                            │                            │ 5. 写入 Orders 表        │                          │
+     │                            │                            │ (SQL Server)             │                          │
+     │                            │                            │                          │                          │
+     │                            │                            │ 6. 写入 OutboxMessages   │                          │
+     │                            │                            │ (Type=OrderCreatedEvent) │                          │
+     │                            │                            │                          │                          │
+     │ 202 Accepted               │                            │                          │                          │
+     │<───────────────────────────│                            │                          │                          │
+     │                            │                            │                          │                          │
+     │                            │                            │ 7. OutboxDispatcher 轮询 │                          │
+     │                            │                            │ 发布未处理消息            │                          │
+     │                            │<───────────────────────────┤                          │                          │
+     │                            │ OrderCreatedEvent          │                          │                          │
+     │                            ├──────────────────────────────────────────────────────>│                          │
+     │                            │                            │                          │ 8. 消费事件              │
+     │                            │                            │                          ├─────────────────────────>│
+     │                            │                            │                          │                          │
+     │                            │                            │                          │                          │ 9. 处理支付
+     │                            │                            │                          │                          │ (Task.Delay)
+     │                            │                            │                          │                          │
+     │                            │                            │                          │                          │ 10. 发布 PaymentCompleted
+     │                            │                            │                          │                          ├───>│
+     │                            │                            │                          │                          │
+```
+
+#### 2.3 关键状态转换
+
+```
+订单状态 (OrderStatus):
+┌──────────────┐   创建订单   ┌──────────────┐   支付完成   ┌──────────────┐
+│   (未存在)   │ ──────────> │   Pending    │ ──────────> │  Completed   │
+└──────────────┘             └──────┬───────┘             └──────────────┘
+                                    │
+                                    │ 支付失败
+                                    ▼
+                             ┌──────────────┐
+                             │   Failed     │
+                             └──────────────┘
+
+Outbox 消息状态:
+┌──────────────┐  Dispatcher  ┌──────────────┐  发布成功   ┌──────────────┐
+│  OccurredOn  │ ──────────> │  ProcessedOn  │ ──────────> │   NULL (已处理)│
+│  ErrorMsg=   │             │  = NULL       │             │              │
+│  NULL        │             └──────┬───────┘             └──────────────┘
+└──────────────┘                    │ 失败
+                                    ▼
+                             ┌──────────────┐
+                             │  ErrorMsg =  │
+                             │  错误详情     │
+                             └──────────────┘
+```
+
+---
+
+### 3. 接口请求流程文档
+
+所有接口通过 API Gateway (`http://localhost:8010`) 访问。除标识为「公开」的接口外，其他需要 JWT 鉴权的接口必须在请求头携带：
+
+```
+Authorization: Bearer <token>
+```
+
+#### 3.1 Identity 服务接口（身份认证）
+
+##### 3.1.1 用户注册
+
+```
+POST /identity/api/auth
+Content-Type: application/json
+```
+
+**请求参数：**
+```json
+{
+  "name": "张三",
+  "email": "zhangsan@example.com",
+  "password": "Pass@word1"
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| name | string | 是 | 用户名 |
+| email | string | 是 | 邮箱（作为登录账号） |
+| password | string | 是 | 密码（需包含大小写字母、数字、特殊字符） |
+
+**响应：** `200 OK`
+```json
+{
+  "message": "Registration successfully"
+}
+```
+
+**请求流程：**
+```
+[Client] ──POST──> [Ocelot:8010] ──> [identity.api:8060/api/auth]
+                                              │
+                                              ▼
+                                      [ASP.NET Identity]
+                                      写入 IdentityDb
+                                              │
+                                              ▼
+                                        200 OK
+```
+
+##### 3.1.2 用户登录（获取 JWT）
+
+```
+POST /identity/api/auth/login
+Content-Type: application/json
+```
+
+**请求参数：**
+```json
+{
+  "email": "zhangsan@example.com",
+  "password": "Pass@word1"
+}
+```
+
+**响应：** `200 OK`
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ6..."
+}
+```
+
+**Token 结构（JWT Payload）：**
+```json
+{
+  "sub": "zhangsan@example.com",
+  "unique_name": "zhangsan@example.com",
+  "uid": "<user-guid>",
+  "iss": "learn-dotnet-ecommerce-microservices",
+  "aud": "learn-dotnet-ecommerce-microservices",
+  "exp": 1756355200
+}
+```
+
+**请求流程：**
+```
+[Client] ──POST──> [Ocelot:8010] ──> [identity.api:8060/api/auth/login]
+                                              │
+                                              ▼
+                                      [UserManager 查询 IdentityDb]
+                                              │ 校验密码
+                                              ▼
+                                      [生成 JWT (HS256)]
+                                              │
+                                              ▼
+                                      200 OK + { token }
+```
+
+---
+
+#### 3.2 Catalog 服务接口（商品目录）
+
+##### 3.2.1 获取所有商品（分页 + 过滤）
+
+```
+GET /Catalog/GetAllProducts?pageIndex=1&pageSize=10&brand=602d2149e773f2a3990b47f6
+```
+
+**查询参数：**
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| pageIndex | int | 1 | 页码 |
+| pageSize | int | 10 | 每页条数（最大 70） |
+| brandId | string | - | 品牌过滤 |
+| typeId | string | - | 类型过滤 |
+| sort | string | - | 排序字段 |
+| search | string | - | 搜索关键字 |
+
+**响应：** `200 OK`
+```json
+[
+  {
+    "id": "602d2149e773f2a3990b47f8",
+    "name": "Adidas Quick Force Indoor Badminton Shoes",
+    "summary": "Professional badminton shoes",
+    "description": "Description text",
+    "imageFile": "product-1.png",
+    "brand": {
+      "id": "602d2149e773f2a3990b47f6",
+      "name": "Adidas"
+    },
+    "type": {
+      "id": "602d2149e773f2a3990b47f2",
+      "name": "Shoes"
+    },
+    "price": 1000.00,
+    "createdDate": "2026-06-29T10:00:00Z"
+  }
+]
+```
+
+**请求流程：**
+```
+[Client] ──GET──> [Ocelot:8010] ──> [catalog.api:8000/api/v1/Catalog/GetAllProducts]
+                                              │
+                                              ▼
+                                      [MediatR GetAllProductsQuery]
+                                              │
+                                              ▼
+                                      [MongoDB Aggregation]
+                                      (join brands + types)
+                                              │
+                                              ▼
+                                        200 OK
+```
+
+##### 3.2.2 根据 ID 获取商品
+
+```
+GET /Catalog/{id}
+```
+
+**路径参数：** `id` - MongoDB ObjectId（24 位十六进制字符串）
+
+**响应：** `200 OK`（同上单条商品对象）；若不存在 `404 Not Found`
+
+##### 3.2.3 根据品牌获取商品
+
+```
+GET /Catalog/brand/{brand}
+```
+
+**路径参数：** `brand` - 品牌 ID
+
+##### 3.2.4 获取所有品牌
+
+```
+GET /Catalog/GetAllBrands
+```
+
+**响应：** `200 OK`
+```json
+[
+  { "id": "602d2149e773f2a3990b47f6", "name": "Adidas" },
+  { "id": "602d2149e773f2a3990b47f7", "name": "Yonex" }
+]
+```
+
+##### 3.2.5 获取所有类型
+
+```
+GET /Catalog/GetAllTypes
+```
+
+**响应：** `200 OK`
+```json
+[
+  { "id": "602d2149e773f2a3990b47f2", "name": "Shoes" },
+  { "id": "602d2149e773f2a3990b47f3", "name": "Racquet" }
+]
+```
+
+##### 3.2.6 根据商品名称搜索商品
+
+```
+GET /Catalog/productName/{productName}
+```
+
+**路径参数：** `productName` - 商品名称（URL 编码，支持空格等特殊字符）
+
+**响应：** `200 OK`（返回匹配的商品列表）；若无匹配返回 `404 Not Found`
+```json
+[
+  {
+    "id": "602d2149e773f2a3990b47f8",
+    "name": "Adidas Quick Force Indoor Badminton Shoes",
+    "price": 3500.00
+  }
+]
+```
+
+**请求流程：**
+```
+[Client] ──GET──> [Ocelot:8010] ──> [catalog.api:8000/api/v1/Catalog/productName/{productName}]
+                                              │
+                                              ▼
+                                      [MediatR GetProductsByProductNameQuery]
+                                              │
+                                              ▼
+                                      [MongoDB: find Name = @productName]
+                                              │
+                                              ▼
+                                        200 OK / 404
+```
+
+##### 3.2.7 创建商品
+
+```
+POST /Catalog
+Content-Type: application/json
+```
+
+**请求参数：**
+```json
+{
+  "name": "New Badminton Racket",
+  "summary": "Professional grade racket",
+  "description": "Carbon fiber frame, lightweight design",
+  "imageFile": "new-racket.png",
+  "brandId": "602d2149e773f2a3990b47f6",
+  "typeId": "602d2149e773f2a3990b47f3",
+  "price": 1500.00
+}
+```
+
+| 字段 | 类型 | 必填 | 校验规则 |
+|------|------|------|----------|
+| name | string | 是 | 非空 |
+| summary | string | 是 | 非空 |
+| description | string | 是 | 非空 |
+| imageFile | string | 是 | 非空 |
+| brandId | string | 是 | 有效的品牌 ID |
+| typeId | string | 是 | 有效的类型 ID |
+| price | decimal | 是 | ≥ 0.01 |
+
+**响应：** `200 OK`（返回新创建的商品对象，包含生成的 `id`）
+
+**请求流程：**
+```
+[Client] ──POST──> [Ocelot:8010] ──> [catalog.api:8000/api/v1/Catalog]
+                                              │
+                                              ▼
+                                      [MediatR CreateProductCommand]
+                                              │
+                                              ▼
+                                      [校验 Brand + Type 存在]
+                                      [MongoDB: INSERT Products]
+                                              │
+                                              ▼
+                                        200 OK + ProductResponse
+```
+
+##### 3.2.8 更新商品
+
+```
+PUT /Catalog/{id}
+Content-Type: application/json
+```
+
+**路径参数：** `id` - MongoDB ObjectId
+
+**请求参数：**
+```json
+{
+  "name": "Updated Racket Name",
+  "summary": "Updated summary",
+  "description": "Updated description",
+  "imageFile": "updated.png",
+  "brandId": "602d2149e773f2a3990b47f6",
+  "typeId": "602d2149e773f2a3990b47f3",
+  "price": 1200.00
+}
+```
+
+**响应：** `204 No Content`（成功）；若商品不存在返回 `404 Not Found`
+
+##### 3.2.9 删除商品
+
+```
+DELETE /Catalog/{id}
+```
+
+**路径参数：** `id` - MongoDB ObjectId（24 位十六进制字符串）
+
+**响应：** `204 No Content`（成功）；若商品不存在返回 `404 Not Found`
+
+**请求流程：**
+```
+[Client] ──DELETE──> [Ocelot:8010] ──> [catalog.api:8000/api/v1/Catalog/{id}]
+                                              │
+                                              ▼
+                                      [MediatR DeleteProductByIdCommand]
+                                              │
+                                              ▼
+                                      [MongoDB: DELETE Products]
+                                      WHERE _id = ObjectId(id)
+                                              │
+                                              ▼
+                                        204 / 404
+```
+
+---
+
+#### 3.3 Basket 服务接口（购物车）
+
+##### 3.3.1 获取购物车
+
+```
+GET /Basket/{userName}
+```
+
+**路径参数：** `userName` - 用户名
+
+**响应：** `200 OK`
+```json
+{
+  "userName": "zhangsan@example.com",
+  "items": [
+    {
+      "productId": "602d2149e773f2a3990b47f8",
+      "productName": "Adidas Quick Force Indoor Badminton Shoes",
+      "imageFile": "product-1.png",
+      "price": 500.00,
+      "quantity": 1
+    }
+  ],
+  "totalPrice": 500.00
+}
+```
+
+##### 3.3.2 创建/更新购物车（**gRPC 集成**）
+
+```
+POST /Basket
+Content-Type: application/json
+```
+
+**请求参数：**
+```json
+{
+  "userName": "zhangsan@example.com",
+  "items": [
+    {
+      "productId": "602d2149e773f2a3990b47f8",
+      "productName": "Adidas Quick Force Indoor Badminton Shoes",
+      "imageFile": "product-1.png",
+      "price": 1000.00,
+      "quantity": 1
+    }
+  ]
+}
+```
+
+**响应：** `200 OK`（返回应用折扣后的购物车，`price` 已更新）
+
+**请求流程（含 gRPC 调用）：**
+```
+[Client] ──POST──> [Ocelot:8010] ──> [basket.api:8020/api/v1/Basket]
+                                              │
+                                              ▼
+                                  [CreateShoppingCartHandler]
+                                              │
+                                              │ 遍历每个商品
+                                              ▼
+                                  ┌────────────────────────────┐
+                                  │ DiscountGrpcService        │
+                                  │  .GetDiscount(productName) │
+                                  └────────────┬───────────────┘
+                                               │ gRPC (HTTP/2)
+                                               ▼
+                                  [discount.api:8030]
+                                  [GetDiscountQuery]
+                                  [PostgreSQL: SELECT amount]
+                                               │
+                                               │ 返回 CouponModel
+                                               ▼
+                                  [price -= coupon.Amount]
+                                  (1000 - 500 = 500)
+                                               │
+                                               ▼
+                                  [Redis: SET basket:userName]
+                                               │
+                                               ▼
+                                       200 OK + 购物车
+```
+
+##### 3.3.3 删除购物车
+
+```
+DELETE /Basket/{userName}
+```
+
+**响应：** `200 OK`（返回 `true` / `false`）
+
+##### 3.3.4 结账（**JWT 鉴权 + 事件发布**）
+
+```
+POST /Basket/Checkout
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+**请求参数：**
+```json
+{
+  "userName": "zhangsan@example.com",
+  "totalPrice": 500.00,
+  "name": "张三",
+  "emailAddress": "zhangsan@example.com",
+  "addressLine": "南京路 100 号",
+  "country": "CN",
+  "state": "Shanghai",
+  "zipCode": "200000",
+  "cardName": "VISA",
+  "cardNumber": "4111111111111111",
+  "cardExpiration": "12/30",
+  "cvv": "123",
+  "paymentMethod": 1
+}
+```
+
+| 字段 | 类型 | 必填 | 校验规则 |
+|------|------|------|----------|
+| cardNumber | string | 是 | 须通过 Luhn 算法校验（测试卡 `4111111111111111`） |
+| cardExpiration | string | 是 | 格式 `MM/YY` |
+| cvv | string | 是 | 3 或 4 位数字 |
+| totalPrice | decimal | 是 | ≥ 0 |
+
+**响应：** `202 Accepted`（无响应体）
+
+**请求流程（触发事件驱动 Saga）：**
+```
+[Client] ──POST (JWT)──> [Ocelot:8010]
+   ├──鉴权成功────────> [basket.api:8020/api/v1/Basket/Checkout]
+   │                          │
+   │                          ▼
+   │                  [BasketCheckoutHandler]
+   │                          │
+   │                          ▼
+   │                  [MassTransit Publish]
+   │                  BasketCheckoutEvent
+   │                          │
+   │                          ▼
+   │                  [RabbitMQ: basket-checkout-queue]
+   │                          │
+   │                          ▼ (异步)
+   │                  [Ordering.api 消费事件]
+   │                  [CreateOrderHandler]
+   │                  [FluentValidation]
+   │                  [写入 SQL Server + Outbox]
+   │                          │
+   │                          ▼ (异步)
+   │                  [OutboxDispatcher]
+   │                  OrderCreatedEvent
+   │                          │
+   │                          ▼
+   │                  [RabbitMQ: order-created-queue]
+   │                          │
+   │                          ▼ (异步)
+   │                  [Payment.api 消费事件]
+   │                  [处理支付 → 发布 PaymentCompletedEvent]
+   │
+   └──> 立即返回 202 Accepted
+```
+
+---
+
+#### 3.4 Ordering 服务接口（订单管理，**JWT 鉴权**）
+
+##### 3.4.1 获取用户订单
+
+```
+GET /Order/{userName}
+Authorization: Bearer <token>
+```
+
+**响应：** `200 OK`
+```json
+[
+  {
+    "id": 1002,
+    "userName": "zhangsan@example.com",
+    "totalPrice": 500.00,
+    "name": "张三",
+    "emailAddress": "zhangsan@example.com",
+    "addressLine": "南京路 100 号",
+    "country": "CN",
+    "state": "Shanghai",
+    "zipCode": "200000",
+    "cardName": "VISA",
+    "cardNumber": "4111111111111111",
+    "cardExpiration": "12/30",
+    "cvv": "123",
+    "paymentMethod": 1
+  }
+]
+```
+
+**请求流程：**
+```
+[Client] ──GET (JWT)──> [Ocelot:8010]
+   │   JWT 鉴权         │
+   ▼                    ▼
+[AuthenticationMiddleware] ──> [ordering.api:8040/api/v1/Order/{userName}]
+                                       │
+                                       ▼
+                              [IQueryHandler<GetOrderListQuery>]
+                                       │
+                                       ▼
+                              [EF Core 查询 SQL Server]
+                              WHERE UserName = @userName
+                                       │
+                                       ▼
+                                  200 OK
+```
+
+##### 3.4.2 创建订单
+
+```
+POST /Order
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+**请求参数：** 同 `BasketCheckoutDto` 的字段集合
+
+**响应：** `200 OK`
+```json
+1002   // 返回新创建的订单 ID
+```
+
+##### 3.4.3 更新订单
+
+```
+PUT /Order
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+**请求参数：** `OrderDto`（包含 `Id` 字段）
+
+##### 3.4.4 删除订单
+
+```
+DELETE /Order/{id}
+Authorization: Bearer <token>
+```
+
+**响应：** `204 No Content`
+
+---
+
+#### 3.5 Discount 服务接口（gRPC）
+
+Discount 服务通过 **gRPC（HTTP/2）** 暴露在 `discount.api:8080`，由 Basket.API 内部调用，**不通过 Ocelot 网关**。
+
+**Proto 定义（`discount.proto`）：**
+```protobuf
+service DiscountProtoService {
+  rpc GetDiscount(GetDiscountRequest) returns (CouponModel);
+  rpc CreateDiscount(CreateDiscountRequest) returns (CouponModel);
+  rpc UpdateDiscount(UpdateDiscountRequest) returns (CouponModel);
+  rpc DeleteDiscount(DeleteDiscountRequest) returns (DeleteDiscountResponse);
+}
+
+message CouponModel {
+  int32 id = 1;
+  string productName = 2;
+  string description = 3;
+  int32 amount = 4;
+}
+```
+
+**调用示例（来自 Basket.API）：**
+```csharp
+var request = new GetDiscountRequest { ProductName = "Adidas Quick Force Indoor Badminton Shoes" };
+var coupon = await discountProtoServiceClient.GetDiscountAsync(request);
+// coupon.Amount = 500
+// item.Price -= coupon.Amount;  → 1000 - 500 = 500
+```
+
+**数据库中的折扣券数据：**
+```sql
+SELECT * FROM coupon;
+-- id | productname                                         | description       | amount
+----+-----------------------------------------------------+-------------------+-------
+--  1 | Adidas Quick Force Indoor Badminton Shoes           | Shoe Discount     |    500
+--  2 | Yonex VCORE Pro 100 A Tennis Racquet (270gm, Strung)| Racquet Discount  |    700
+```
+
+##### 3.5.1 GetDiscount - 查询折扣券
+
+**请求：** `GetDiscountRequest`
+```protobuf
+message GetDiscountRequest {
+  string productName = 1;   // 商品名称（精确匹配）
+}
+```
+
+**响应：** `CouponModel`
+```protobuf
+message CouponModel {
+  int32 id = 1;
+  string productName = 2;
+  string description = 3;
+  int32 amount = 4;          // 折扣金额（分），从商品原价中扣除
+}
+```
+
+**调用示例：**
+```csharp
+var request = new GetDiscountRequest { ProductName = "Adidas Quick Force Indoor Badminton Shoes" };
+var coupon = await discountProtoServiceClient.GetDiscountAsync(request);
+// coupon.Amount = 500
+// item.Price -= coupon.Amount;  → 1000 - 500 = 500
+```
+
+**请求流程：**
+```
+[Basket.API] ──gRPC──> [discount.api:8080]
+       GetDiscountRequest(productName)
+                                │
+                                ▼
+                       [MediatR GetDiscountQuery]
+                                │
+                                ▼
+                       [PostgreSQL: SELECT FROM coupon
+                        WHERE productname = @productName]
+                                │
+                                ▼
+                       返回 CouponModel (amount=500)
+```
+
+##### 3.5.2 CreateDiscount - 创建折扣券
+
+**请求：** `CreateDiscountRequest`
+```protobuf
+message CreateDiscountRequest {
+  CouponModel coupon = 1;    // 待创建的折扣券对象
+}
+```
+
+**调用示例：**
+```csharp
+var request = new CreateDiscountRequest
+{
+    Coupon = new CouponModel
+    {
+        ProductName = "New Product Name",
+        Description = "10% off promotion",
+        Amount = 100
+    }
+};
+var created = await discountProtoServiceClient.CreateDiscountAsync(request);
+// created.Id = 新生成的 ID
+```
+
+**响应：** `CouponModel`（包含新生成的 `id`）
+
+**请求流程：**
+```
+[Client] ──gRPC──> [discount.api:8080]
+       CreateDiscountRequest(coupon)
+                          │
+                          ▼
+                  [MediatR CreateDiscountCommand]
+                          │
+                          ▼
+                  [PostgreSQL: INSERT INTO coupon
+                   (productname, description, amount)
+                   VALUES (@productName, @description, @amount)]
+                          │
+                          ▼
+                  返回 CouponModel (含新 id)
+```
+
+##### 3.5.3 UpdateDiscount - 更新折扣券
+
+**请求：** `UpdateDiscountRequest`
+```protobuf
+message UpdateDiscountRequest {
+  CouponModel coupon = 1;    // 待更新的折扣券（需包含 id）
+}
+```
+
+**调用示例：**
+```csharp
+var request = new UpdateDiscountRequest
+{
+    Coupon = new CouponModel
+    {
+        Id = 1,
+        ProductName = "Adidas Quick Force Indoor Badminton Shoes",
+        Description = "Updated: 20% off",
+        Amount = 200
+    }
+};
+var updated = await discountProtoServiceClient.UpdateDiscountAsync(request);
+```
+
+**响应：** `CouponModel`（更新后的对象）
+
+##### 3.5.4 DeleteDiscount - 删除折扣券
+
+**请求：** `DeleteDiscountRequest`
+```protobuf
+message DeleteDiscountRequest {
+  string productName = 1;   // 通过商品名称删除
+}
+```
+
+**调用示例：**
+```csharp
+var request = new DeleteDiscountRequest { ProductName = "Old Product Name" };
+var response = await discountProtoServiceClient.DeleteDiscountAsync(request);
+// response.Success = true / false
+```
+
+**响应：** `DeleteDiscountResponse`
+```protobuf
+message DeleteDiscountResponse {
+  bool success = 1;          // 是否删除成功
+}
+```
+
+**请求流程：**
+```
+[Client] ──gRPC──> [discount.api:8080]
+       DeleteDiscountRequest(productName)
+                          │
+                          ▼
+                  [MediatR DeleteDiscountCommand]
+                          │
+                          ▼
+                  [PostgreSQL: DELETE FROM coupon
+                   WHERE productname = @productName]
+                          │
+                          ▼
+                  返回 DeleteDiscountResponse (success=true/false)
+```
+
+---
+
+### 4. 完整端到端请求时序
+
+以下展示「从注册到完成支付」的完整请求时序：
+
+```
+时间线    客户端              Ocelot           微服务            数据库/中间件
+  │
+  │  1. POST /identity/api/auth ───────────────────────> IdentityDb (INSERT)
+  │     body: {name,email,password}
+  │  <─ 200 { message }
+  │
+  │  2. POST /identity/api/auth/login ──────────────────> IdentityDb (SELECT)
+  │     body: {email,password}
+  │  <─ 200 { token: "eyJ..." }
+  │
+  │  3. GET /Catalog/GetAllProducts ────────────────────> MongoDB (find)
+  │  <─ 200 [ {id,name,...}, ... ]
+  │
+  │  4. POST /Basket ────────────────────────────────────> Redis (SET)
+  │     body: {userName, items:[{price:1000}]}
+  │                                  │
+  │                                  ├─ gRPC ────────> discount.api
+  │                                  │                PostgreSQL (SELECT)
+  │                                  │ <─ {amount:500}
+  │                                  │ (price = 1000 - 500)
+  │  <─ 200 { items:[{price:500}] }
+  │
+  │  5. POST /Basket/Checkout ───────────────────────────> MassTransit Publish
+  │     Authorization: Bearer <token>                    │
+  │     body: { totalPrice:500, cardNumber:"4111..." }   ▼
+  │                                       RabbitMQ (basket-checkout-queue)
+  │                                                  │
+  │  <─ 202 Accepted                                ▼ (异步消费)
+  │                                          Ordering.api
+  │                                          - FluentValidation 校验
+  │                                          - INSERT INTO Orders
+  │                                          - INSERT INTO OutboxMessages
+  │                                                  │
+  │                                                  ▼ (OutboxDispatcher 轮询)
+  │                                          RabbitMQ (order-created-queue)
+  │                                                  │
+  │                                                  ▼ (异步消费)
+  │                                          Payment.api
+  │                                          - Task.Delay(1000)
+  │                                          - 模拟支付完成
+  │                                          - Publish PaymentCompletedEvent
+  │
+  │  6. GET /Order/{email} (Bearer JWT) ────────────────> SQL Server (SELECT)
+  │  <─ 200 [ {id:1002, totalPrice:500, ...} ]
+  │
+  ▼
+```
+
+### 5. 端口与容器映射速查
+
+| 容器名 | 内部端口 | 外部端口 | 数据库 |
+|--------|----------|----------|--------|
+| ocelot.apigateway | 8080 | 8010 | - |
+| catalog.api | 8080 | 8000 | catalog.db (MongoDB:27017) |
+| basket.api | 8080 | 8020 | basket.db (Redis:6379) |
+| discount.api | 8080 | 8030 | discount.db (Postgres:5432) |
+| ordering.api | 8080 | 8040 | ordering.db (SQLServer:1433) |
+| payment.api | 8080 | 8050 | - |
+| identity.api | 8080 | 8060 | identity.db (SQLServer:1434) |
+| rabbitmq | 5672 / 15672 | 5672 / 15672 | - |
+| elasticsearch | 9200 | 9200 | - |
+| kibana | 5601 | 5601 | - |

@@ -12,9 +12,7 @@ public static class DbExtensions
     {
         using var scope = host.Services.CreateScope();
         var services = scope.ServiceProvider;
-        // var loggerFactory = services.GetRequiredService<ILoggerFactory>();
-        // var logger = loggerFactory.CreateLogger("DbExtensions");
-        var logger = services.GetRequiredService<ILogger>();
+        var logger = services.GetRequiredService<ILoggerFactory>().CreateLogger("DbExtensions");
         var databaseSettings = services.GetRequiredService<IOptions<DatabaseSettings>>().Value;
 
         try
@@ -35,6 +33,7 @@ public static class DbExtensions
     private static void ApplyMigration(string connectionString)
     {
         var retry = 5;
+        var delay = TimeSpan.FromSeconds(5);
         do
         {
             try
@@ -60,12 +59,12 @@ public static class DbExtensions
                 command.ExecuteNonQuery();
 
                 command.CommandText = @"
-                    INSERT INTO Coupon (ProductName, Description, Amount) 
+                    INSERT INTO Coupon (ProductName, Description, Amount)
                     VALUES ('Adidas Quick Force Indoor Badminton Shoes', 'Shoe Discount', 500)";
                 command.ExecuteNonQuery();
 
                 command.CommandText = @"
-                    INSERT INTO Coupon (ProductName, Description, Amount) 
+                    INSERT INTO Coupon (ProductName, Description, Amount)
                     VALUES ('Yonex VCORE Pro 100 A Tennis Racquet (270gm, Strung)', 'Racquet Discount', 700)";
                 command.ExecuteNonQuery();
                 break;
@@ -77,6 +76,7 @@ public static class DbExtensions
                 {
                     throw;
                 }
+                Thread.Sleep(delay);
             }
         } while (retry > 0);
     }

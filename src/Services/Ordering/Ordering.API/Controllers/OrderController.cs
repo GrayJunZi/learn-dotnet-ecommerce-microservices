@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc;
+using Ordering.Application.Abstractions;
 using Ordering.Application.DTOs;
 using Ordering.Application.Mappers;
 using Ordering.Application.Orders.CreateOrder;
@@ -11,10 +12,10 @@ namespace Ordering.API.Controllers;
 [ApiController]
 [Route("api/v1/[controller]")]
 public class OrderController(
-    CreateOrderHandler createOrderHandler,
-    UpdateOrderHandler updateOrderHandler,
-    DeleteOrderHandler deleteOrderHandler,
-    GetOrderListHandler getOrderListHandler,
+    ICommandHandler<CreateOrderCommand, int> createOrderHandler,
+    ICommandHandler<UpdateOrderCommand> updateOrderHandler,
+    ICommandHandler<DeleteOrderCommand> deleteOrderHandler,
+    IQueryHandler<GetOrderListQuery, List<OrderDto>> getOrderListHandler,
     ILogger<OrderController> logger) : ControllerBase
 {
     [HttpGet("{userName}", Name = "GetOrdersByUserName")]
@@ -57,7 +58,7 @@ public class OrderController(
         var command = new DeleteOrderCommand(id);
 
         await deleteOrderHandler.Handle(command, cancellationToken);
-        
+
         logger.LogInformation("Order deleted with Id {Id}", id);
         return NoContent();
     }

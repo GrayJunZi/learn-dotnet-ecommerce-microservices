@@ -42,15 +42,23 @@ public static class Logging
                 env.EnvironmentName?.ToLower() ?? "development"
             );
 
-            loggerConfiguration.WriteTo.Elasticsearch(
-                new[] { new Uri(elasticUri) },
-                opts =>
-                {
-                    opts.DataStream = dataStream;
-                    opts.BootstrapMethod = BootstrapMethod.Failure;
-                },
-                _ => { }
-            );
+            try
+            {
+                loggerConfiguration.WriteTo.Elasticsearch(
+                    new[] { new Uri(elasticUri) },
+                    opts =>
+                    {
+                        opts.DataStream = dataStream;
+                        opts.BootstrapMethod = BootstrapMethod.None;
+                    },
+                    _ => { }
+                );
+            }
+            catch
+            {
+                // Elasticsearch sink configuration failed (e.g. cluster not reachable yet).
+                // Console sink is still configured, so logging will continue to work.
+            }
         }
     };
 }
